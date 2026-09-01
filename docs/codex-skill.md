@@ -47,10 +47,10 @@ The dogfood task branch remains unmerged and its `REVIEW_REF` remains immutable 
 
 - M3.0 Single-Round Orchestration: **Frozen**.
 - M3 overall: **IN PROGRESS**.
-- M3.1 Automatic Multi-Round Review/Fix Loop: **NEXT**.
+- M3.1 Automatic Multi-Round Review/Fix Loop: **DESIGN FROZEN / IMPLEMENTATION NEXT**.
 - M3.2 Recovery / Conversation Binding / UX Hardening: **PLANNED**.
 
-M3.1 must build on the frozen single-round contract. This freeze does not start M3.1 or change M4/M5/M6 ownership.
+M3.1 must build on the frozen single-round contract. Its frozen design keeps one task branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` will eventually continue automatically, subject to deterministic guards and a configurable iteration limit. This documentation freeze does not implement that loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
 
 ## Troubleshooting
 

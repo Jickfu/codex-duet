@@ -109,6 +109,181 @@ REVIEWING
 
 This verifies that a Browser wait timeout does not authorize message replay or Executor side-effect replay, while durable `REVIEWING` supports safe wait/ingest recovery.
 
+## M3.1 — Multi-Round Contract Design
+
+Design status: **Frozen**
+
+Implementation status: **NEXT**
+
+M3.1 extends the Frozen M1 Browser Control Plane, Frozen M2 GitHub Data Plane, and Frozen M3.0 single-round orchestration. It does not change `BASE_REF` or `REVIEW_REF` semantics, M2 push rules, M1 send/wait behavior, `PLAN → EXECUTING` safety, or the requirement that review send succeeds before `REVIEWING`.
+
+### Multi-round lifecycle
+
+M3.1 will continue a valid Reviewer-requested plan without another user prompt:
+
+```text
+PLANNING
+→ PLAN #1
+→ EXECUTING
+→ EXECUTED
+→ REVIEWING
+  ├─ DONE
+  ├─ BLOCKED
+  ├─ FAILED
+  └─ PLAN #2
+     → EXECUTING
+     → EXECUTED
+     → REVIEWING
+       └─ PLAN #3
+          → ...
+```
+
+This is normal multi-round continuation only. Full `EXECUTING` crash reconciliation remains M3.2 work.
+
+### Review identity
+
+One task has one immutable `BASE_REF`, captured by Frozen M2 at initialization. Every iteration stays on the same generated task branch. A previous `REVIEW_REF` never becomes a new `BASE_REF`.
+
+For iteration `N`, the formal and authoritative review identity is cumulative:
+
+```text
+BASE_REF..CURRENT_REVIEW_REF
+```
+
+For iteration greater than 1, the previous reviewed SHA adds a delta focus:
+
+```text
+PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF
+```
+
+The Reviewer first inspects this delta to understand the correction and detect regressions, then validates the cumulative formal range to approve the task as a whole. The delta is an efficiency hint, not a correctness identity.
+
+`PREVIOUS_REVIEW_REF` is not a new C2C header. M0 remains frozen. M3.1 will place the previous durable review SHA in the `EXECUTED` content while continuing to carry task, iteration, `BASE_REF`, current `REVIEW_REF`, and test status through existing fields. Codex must not infer or invent any SHA.
+
+### Iteration and commit semantics
+
+Iteration numbering binds `PLAN #N`, execution `#N`, `REVIEW_REF_N`, and review `#N`:
+
+- `DONE`, `BLOCKED`, and `FAILED` from review use `ITERATION: N`.
+- A Reviewer-requested correction uses `STATE: PLAN` with `ITERATION: N+1`.
+- M3.1 continues that durable next plan automatically when all deterministic guards pass and no user decision is required.
+
+All rounds use the same `agent/task-<taskId>` branch. An iteration may contain one or more normal commits. Frozen M2 must still verify that the current local `HEAD` is safely pushed and that the remote task-branch SHA equals `REVIEW_REF_N`.
+
+Review refs must be monotonic:
+
+```text
+BASE_REF
+  ↓
+REVIEW_REF_1
+  ↓
+REVIEW_REF_2
+  ↓
+REVIEW_REF_3
+```
+
+Each prior review ref must be an ancestor of the next. History rewrite, reset behind a reviewed ref, force-push, or divergence from reviewed history is forbidden. M3.1 records and checks sequence consistency at the orchestration layer without duplicating M2 transport or push safety.
+
+### Durable history target
+
+M3.1 must preserve evidence for every iteration rather than overwrite the current plan and review target. The target versioned model is conceptually:
+
+```ts
+type DuetIterationRecord = {
+  iteration: number;
+  plan: { sha256: string };
+  reviewTarget?: GitHubReviewTarget;
+};
+
+type DuetRunCheckpointV2 = {
+  version: 2;
+  taskId: string;
+  mode: 'GITHUB';
+  iteration: number;
+  state: TaskState;
+  context: GitHubContextRef;
+  request: { sha256: string };
+  iterations: DuetIterationRecord[];
+  blockedPhase?: 'PLANNING' | 'EXECUTING' | 'REVIEWING';
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+The target artifact history is likewise iteration-scoped:
+
+```text
+.chatbridge/runs/<taskId>/
+  request.md
+  iterations/
+    1/
+      plan.md
+      review-envelope.txt
+    2/
+      plan.md
+      review-envelope.txt
+```
+
+The implementation must retain M3.0 V1 read compatibility through either V1 reads plus V2 writes or a safe V1-to-V2 migration. It must not mutate the V1 schema in a way that makes existing checkpoints unreadable. The exact migration mechanism is deferred to implementation.
+
+### Automatic continuation and stop semantics
+
+After a valid `REVIEWING N → PLAN N+1` ingest, M3.1 will read the durable next plan, begin execution, edit, test, commit, prepare review through Frozen M2, send, mark reviewing, receive with `wait --parse`, ingest, and repeat. A next-round plan should describe the prior findings, required corrections, behavior to preserve, necessary tests, and scope boundaries rather than restart the task.
+
+The loop stops on:
+
+```text
+DONE
+BLOCKED
+FAILED
+CANCELLED
+invalid C2C
+illegal transition
+M1 safety rejection
+M2 safety rejection
+unexpected branch
+dirty worktree
+ambiguous send
+EXECUTION_RECOVERY_REQUIRED
+```
+
+`BLOCKED` always returns control to the user; automation does not make consequential product decisions on the user's behalf.
+
+M3.1 must add deterministic runaway protection with a configurable `maxIterations` safety budget and a recommended default of 8. Reaching the budget must never be represented as `DONE`. The implementation should return a structured `ITERATION_LIMIT_REACHED` orchestration error while preserving the lifecycle state unless the existing state model later justifies a protocol-compatible alternative. This design does not add a new C2C task state.
+
+### Token and data-plane policy
+
+Every round carries enough deterministic identity to avoid relying on conversation memory: task, iteration, immutable `BASE_REF`, current `REVIEW_REF`, previous review SHA in `EXECUTED` content when applicable, and test status. ChatGPT reads code through the GitHub Data Plane. The Browser Control Plane carries compact control data, never diffs or repository content.
+
+### Example
+
+```text
+BASE_REF = A
+
+Iteration 1:
+  PLAN 1
+  Codex commits
+  REVIEW_REF_1 = B
+  Formal review = A..B
+  Reviewer returns PLAN iteration 2
+
+Iteration 2:
+  Codex fixes and commits
+  REVIEW_REF_2 = C
+  Delta focus  = B..C
+  Formal review = A..C
+  Reviewer returns PLAN iteration 3
+
+Iteration 3:
+  Codex fixes and commits
+  REVIEW_REF_3 = D
+  Delta focus  = C..D
+  Formal review = A..D
+  Reviewer returns DONE iteration 3
+```
+
+The authoritative decision is recorded in [ADR-012](../adr/ADR-012-multi-round-review-identity.md).
+
 ## Known issues
 
 ### ChatGPT tab ambiguity
@@ -121,10 +296,10 @@ The external Skill validator could not run because the current Python environmen
 
 ## M3 roadmap
 
-| Sub-stage | Scope                                          | Status      |
-| --------- | ---------------------------------------------- | ----------- |
-| M3.0      | Codex Skill + Single-Round Orchestration       | **FROZEN**  |
-| M3.1      | Automatic Multi-Round Review/Fix Loop          | **NEXT**    |
-| M3.2      | Recovery / Conversation Binding / UX Hardening | **PLANNED** |
+| Sub-stage | Scope                                          | Status                                  |
+| --------- | ---------------------------------------------- | --------------------------------------- |
+| M3.0      | Codex Skill + Single-Round Orchestration       | **FROZEN**                              |
+| M3.1      | Automatic Multi-Round Review/Fix Loop          | **DESIGN FROZEN / IMPLEMENTATION NEXT** |
+| M3.2      | Recovery / Conversation Binding / UX Hardening | **PLANNED**                             |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

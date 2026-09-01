@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PlaywrightCliChatGPTSession } from '../../src/browser/playwright-cli-session.js';
 import { buildCliOperation } from '../../src/browser/chatgpt-rules.js';
-import { classifyCliFailure } from '../../src/browser/playwright-cli-runner.js';
+import {
+  classifyCliFailure,
+  formatCliDiagnostic,
+} from '../../src/browser/playwright-cli-runner.js';
 import { ChatbridgeError } from '../../src/core/errors.js';
 
 const hexEnvelope = (value: unknown) =>
@@ -12,14 +15,32 @@ const encoded = (args: readonly string[], value: unknown, kind = 'RESULT') => {
 };
 describe('Playwright CLI transport', () => {
   it('returns only structured bridge data, never CLI snapshot output', async () => {
-    const run = vi.fn(async (args: readonly string[]) => ({
-      stdout: encoded(args, { value: 3 }),
-      stderr: '',
-    }));
+    const marker = {
+      conversationUrl: 'https://chatgpt.com/c/test',
+      outgoingUserMessageId: 'user-new',
+      previousAssistantMessageId: 'assistant-old',
+    };
+    const run = vi.fn(async (args: readonly string[], _timeout?: number) => {
+      void _timeout;
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'prepare'
+              ? {
+                  conversationUrl: marker.conversationUrl,
+                  previousUserMessageId: 'user-old',
+                  previousAssistantMessageId: marker.previousAssistantMessageId,
+                }
+              : marker,
+        }),
+        stderr: '',
+      };
+    });
     const session = new PlaywrightCliChatGPTSession({ run }, 'test', 'https://chatgpt.com/', [
       'https://chatgpt.com',
     ]);
-    expect(await session.sendMessage('hello')).toBe(3);
+    expect(await session.sendMessage('hello')).toEqual(marker);
     expect(JSON.stringify(await session.sendMessage('again'))).not.toContain('SECRET DOM');
   });
   it('uses official detach and leaves external-browser lifecycle to the CLI', async () => {
@@ -47,9 +68,70 @@ describe('Playwright CLI transport', () => {
     for (let i = 0; i < 20; i++) await session.isLoggedIn();
     expect(run).toHaveBeenCalledTimes(20);
   });
+  it('recovers a committed send after a CLI process timeout without resending', async () => {
+    const marker = {
+      conversationUrl: 'https://chatgpt.com/c/recovered',
+      outgoingUserMessageId: 'user-new',
+      previousAssistantMessageId: 'assistant-old',
+    };
+    const run = vi.fn(async (args: readonly string[], _timeout?: number) => {
+      void _timeout;
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit') throw new ChatbridgeError('timeout', 'PLAYWRIGHT_CLI_TIMEOUT');
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'prepare'
+              ? {
+                  conversationUrl: 'https://chatgpt.com/c/original',
+                  previousUserMessageId: 'user-old',
+                  previousAssistantMessageId: 'assistant-old',
+                }
+              : marker,
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 't', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    expect(await session.sendMessage('once')).toEqual(marker);
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(run.mock.calls[1]?.[1]).toBe(30_000);
+    expect(
+      run.mock.calls.filter(([args]) => String(args[2]).includes('"kind":"commit"')),
+    ).toHaveLength(1);
+  });
+  it('reports an unknown send outcome when timeout recovery finds no new user identity', async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit') throw new ChatbridgeError('timeout', 'PLAYWRIGHT_CLI_TIMEOUT');
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'prepare'
+              ? { conversationUrl: 'https://chatgpt.com/c/test', previousUserMessageId: 'old' }
+              : null,
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 't', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await expect(session.sendMessage('unknown')).rejects.toMatchObject({
+      code: 'SEND_OUTCOME_UNKNOWN',
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+  });
   it('generated operations contain navigation abort guards and no storage/screenshot access', () => {
     const code = buildCliOperation(
-      { kind: 'wait', afterCount: 1, timeoutMs: 1000 },
+      {
+        kind: 'wait',
+        conversationUrl: 'https://chatgpt.com/c/test',
+        outgoingUserMessageId: 'user-id',
+        timeoutMs: 1000,
+      },
       'https://chatgpt.com/',
       ['https://chatgpt.com'],
     );
@@ -80,13 +162,54 @@ describe('Playwright CLI transport', () => {
       off: vi.fn(),
       mainFrame: () => frame,
       $: vi.fn(async () => ({})),
-    };
-    const page: any = {
       context: () => ({ pages: () => [target], newPage: async () => target }),
     };
+    const page: any = target;
     const operation = new Function('URL', `return (${code})`)(undefined);
     const output = await operation(page);
     expect(output.startsWith(allowed ? 'CHATBRIDGE_RESULT_' : 'CHATBRIDGE_ERROR_')).toBe(true);
+  });
+  it('uses the supplied current ChatGPT page even when additional ChatGPT tabs exist', async () => {
+    const element = (id: string, role: string) => ({
+      getAttribute: async (name: string) =>
+        name === 'data-message-id' ? id : name === 'data-message-author-role' ? role : null,
+    });
+    const current: any = {
+      url: () => 'https://chatgpt.com/c/current',
+      on: vi.fn(),
+      off: vi.fn(),
+      mainFrame: () => ({}),
+      $$: vi.fn(async () => [element('user-current', 'user')]),
+    };
+    const homepage: any = {
+      url: () => 'https://chatgpt.com/',
+      $$: vi.fn(async () => [element('user-other', 'user')]),
+    };
+    current.context = () => ({ pages: () => [homepage, current] });
+    const operation = new Function(
+      `return (${buildCliOperation({ kind: 'prepare' }, 'https://chatgpt.com/', ['https://chatgpt.com'], 'tabs')})`,
+    )();
+    const output = await operation(current);
+    expect(output).toContain('CHATBRIDGE_RESULT_tabs_');
+    expect(current.$$).toHaveBeenCalledOnce();
+    expect(homepage.$$).not.toHaveBeenCalled();
+  });
+  it('rejects multiple ChatGPT candidates when the supplied page is not ChatGPT', async () => {
+    const candidate = (url: string): any => ({ url: () => url });
+    const foreign: any = {
+      url: () => 'https://example.test/',
+      context: () => ({
+        pages: () => [
+          candidate('https://chatgpt.com/c/one'),
+          candidate('https://chatgpt.com/c/two'),
+          foreign,
+        ],
+      }),
+    };
+    const operation = new Function(
+      `return (${buildCliOperation({ kind: 'prepare' }, 'https://chatgpt.com/', ['https://chatgpt.com'], 'ambiguous')})`,
+    )();
+    expect(await operation(foreign)).toContain('CHATBRIDGE_ERROR_ambiguous_');
   });
   it('classifies only infrastructure timeout, session loss, and generic CLI failures', () => {
     expect(classifyCliFailure({ killed: true }).code).toBe('PLAYWRIGHT_CLI_TIMEOUT');
@@ -97,6 +220,20 @@ describe('Playwright CLI transport', () => {
       'PLAYWRIGHT_CLI_FAILED',
     );
     expect(classifyCliFailure({ stderr: 'unexpected failure' }).code).toBe('PLAYWRIGHT_CLI_FAILED');
+  });
+  it('formats safe diagnostics without stderr, source, prompt, or snapshot content', () => {
+    const diagnostic = formatCliDiagnostic(
+      {
+        code: 1,
+        signal: 'SIGTERM',
+        killed: false,
+        stderr: 'SECRET PROMPT async page => {} ### Snapshot assistant body',
+      },
+      'PLAYWRIGHT_CLI_FAILED',
+    );
+    expect(diagnostic).toContain('exitCode=1');
+    expect(diagnostic).toContain('signal=SIGTERM');
+    expect(diagnostic).not.toMatch(/SECRET|async page|Snapshot|assistant body/);
   });
   it('accepts only a matching nonce and allowlisted structured bridge error', async () => {
     const run = vi.fn(async (args: readonly string[]) => ({
@@ -163,7 +300,13 @@ describe('Playwright CLI transport', () => {
       ['https://chatgpt.com'],
     );
     await expect(
-      timeout.waitForAssistantMessage({ afterCount: 0, timeoutMs: 10 }),
+      timeout.waitForAssistantMessage({
+        checkpoint: {
+          conversationUrl: 'https://chatgpt.com/c/test',
+          outgoingUserMessageId: 'user-id',
+        },
+        timeoutMs: 10,
+      }),
     ).rejects.toMatchObject({ code: 'BRIDGE_TIMEOUT' });
     const lost = new PlaywrightCliChatGPTSession(
       {
@@ -176,7 +319,13 @@ describe('Playwright CLI transport', () => {
       ['https://chatgpt.com'],
     );
     await expect(
-      lost.waitForAssistantMessage({ afterCount: 0, timeoutMs: 10 }),
+      lost.waitForAssistantMessage({
+        checkpoint: {
+          conversationUrl: 'https://chatgpt.com/c/test',
+          outgoingUserMessageId: 'user-id',
+        },
+        timeoutMs: 10,
+      }),
     ).rejects.toMatchObject({ code: 'PLAYWRIGHT_CLI_SESSION_LOST' });
   });
 });

@@ -1,8 +1,8 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { TaskCheckpointStore } from '../../src/core/checkpoint.js';
+import { SessionStore, TaskCheckpointStore } from '../../src/core/checkpoint.js';
 
 describe('task checkpoint', () => {
   it('atomically persists and restores required task identity', async () => {
@@ -29,5 +29,34 @@ describe('task checkpoint', () => {
   it('rejects path-like task IDs', async () => {
     const store = new TaskCheckpointStore(await mkdtemp(path.join(tmpdir(), 'codex-duet-')));
     await expect(store.read('../escape')).rejects.toThrow(/Invalid task ID/);
+  });
+});
+
+describe('browser send checkpoint', () => {
+  it('persists the versioned causal marker without message content', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'codex-duet-session-'));
+    const store = new SessionStore(root);
+    const value = {
+      version: 2 as const,
+      conversationUrl: 'https://chatgpt.com/c/test',
+      outgoingUserMessageId: 'user-id_1',
+      previousAssistantMessageId: 'assistant-id_1',
+      sentAt: new Date().toISOString(),
+    };
+    await store.write(value);
+    expect(await store.read()).toEqual(value);
+    expect(await readFile(path.join(root, 'session.json'), 'utf8')).not.toContain('prompt');
+  });
+
+  it('rejects a legacy assistant-count checkpoint with a migration error', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'codex-duet-session-'));
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      path.join(root, 'session.json'),
+      JSON.stringify({ assistantCount: 3, sentAt: new Date().toISOString() }),
+    );
+    await expect(new SessionStore(root).read()).rejects.toMatchObject({
+      code: 'STALE_SEND_CHECKPOINT',
+    });
   });
 });

@@ -2,6 +2,9 @@ node_modules/
 dist/
 .chatbridge/
 .playwright-cli/
+e2e.txt
+e2e-probe.js
+e2e-message-id-probe.js
 playwright-report/
 test-results/
 *.log

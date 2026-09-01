@@ -1,21 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { chromium, type Browser, type BrowserContext } from 'playwright';
+import { chromium, type Browser } from 'playwright';
 import { PlaywrightChatGPTWebAdapter } from '../../src/browser/chatgpt-adapter.js';
 let browser: Browser;
-let context: BrowserContext;
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true });
-  context = await browser.newContext();
 });
 afterAll(async () => browser.close());
 async function fixture() {
-  const page = await context.newPage();
+  const isolated = await browser.newContext();
+  const page = await isolated.newPage();
   await page.setContent(
-    `<!doctype html><main><div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button></main><script>send.onclick=()=>{window.sent=document.querySelector('#prompt-textarea').textContent}</script>`,
+    `<!doctype html><main><div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button></main><script>window.sequence=0;send.onclick=()=>{window.sent=document.querySelector('#prompt-textarea').textContent;const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-'+(++sequence);user.textContent=window.sent;messages.append(user)}</script>`,
   );
   return {
     page,
-    adapter: new PlaywrightChatGPTWebAdapter(context, 'about:blank', 1000, false, ['about:blank']),
+    adapter: new PlaywrightChatGPTWebAdapter(isolated, 'about:blank', 1000, false, ['about:blank']),
   };
 }
 async function connectedFixture() {
@@ -52,6 +51,10 @@ async function expectForeignUntouched(page: any) {
     })),
   ).toEqual({ composer: '', clicks: 0, reads: 0 });
 }
+const checkpoint = (outgoingUserMessageId: string, conversationUrl = 'about:blank') => ({
+  conversationUrl,
+  outgoingUserMessageId,
+});
 describe('ChatGPT adapter fixture', () => {
   it('reuses an existing ChatGPT tab without reading an unrelated tab DOM', async () => {
     const isolated = await browser.newContext();
@@ -87,7 +90,10 @@ describe('ChatGPT adapter fixture', () => {
   });
   it('sends through the composer', async () => {
     const { page, adapter } = await connectedFixture();
-    expect(await adapter.sendMessage('hello')).toBe(0);
+    expect(await adapter.sendMessage('hello')).toEqual({
+      conversationUrl: 'about:blank',
+      outgoingUserMessageId: 'user-1',
+    });
     expect(await page.evaluate(() => (window as any).sent)).toBe('hello');
     await page.close();
   });
@@ -102,10 +108,12 @@ describe('ChatGPT adapter fixture', () => {
     const { page, adapter } = await connectedFixture();
     await page.evaluate(() => {
       const m = document.querySelector('#messages')!;
-      m.innerHTML = '<div data-message-author-role="assistant">old</div>';
+      m.innerHTML =
+        '<div data-message-author-role="assistant" data-message-id="assistant-old">old</div><div data-message-author-role="user" data-message-id="user-anchor">prompt</div>';
       setTimeout(() => {
         const e = document.createElement('div');
         e.dataset.messageAuthorRole = 'assistant';
+        e.dataset.messageId = 'assistant-new';
         e.dataset.messageStreaming = 'true';
         e.textContent = 'par';
         m.append(e);
@@ -116,7 +124,9 @@ describe('ChatGPT adapter fixture', () => {
       }, 30);
     });
     const started = Date.now();
-    expect(await adapter.waitForAssistantMessage({ afterCount: 1 })).toBe('final response');
+    expect(await adapter.waitForAssistantMessage({ checkpoint: checkpoint('user-anchor') })).toBe(
+      'final response',
+    );
     expect(Date.now() - started).toBeGreaterThanOrEqual(100);
     await page.close();
   });
@@ -124,19 +134,106 @@ describe('ChatGPT adapter fixture', () => {
     const { page, adapter } = await connectedFixture();
     await page.evaluate(() => {
       document.querySelector('#messages')!.innerHTML =
-        '<div data-message-author-role="assistant">one</div><div data-message-author-role="assistant">two</div>';
+        '<div data-message-author-role="assistant" data-message-id="assistant-before">one</div><div data-message-author-role="user" data-message-id="user-target">prompt</div><div data-message-author-role="assistant" data-message-id="assistant-target">two</div><div data-message-author-role="assistant" data-message-id="assistant-after">three</div>';
     });
-    expect(await adapter.waitForAssistantMessage({ afterCount: 1, timeoutMs: 500 })).toBe('two');
+    expect(
+      await adapter.waitForAssistantMessage({
+        checkpoint: checkpoint('user-target'),
+        timeoutMs: 500,
+      }),
+    ).toBe('two');
     await page.close();
+  });
+  it('detects a new assistant identity when the visible assistant count stays constant', async () => {
+    const { page, adapter } = await connectedFixture();
+    await page.evaluate(() => {
+      const messages = document.querySelector('#messages')!;
+      messages.innerHTML =
+        '<div data-message-author-role="assistant" data-message-id="assistant-a">A</div><div data-message-author-role="assistant" data-message-id="assistant-b">B</div><div data-message-author-role="assistant" data-message-id="assistant-c">C</div><div data-message-author-role="user" data-message-id="user-window">prompt</div>';
+      setTimeout(() => {
+        messages.firstElementChild?.remove();
+        messages.insertAdjacentHTML(
+          'beforeend',
+          '<div data-message-author-role="assistant" data-message-id="assistant-d">D</div>',
+        );
+      }, 50);
+    });
+    expect(await adapter.waitForAssistantMessage({ checkpoint: checkpoint('user-window') })).toBe(
+      'D',
+    );
+    expect(await page.locator('[data-message-author-role="assistant"]').count()).toBe(3);
+    await page.close();
+  });
+  it('re-queries an assistant replaced during streaming', async () => {
+    const { page, adapter } = await connectedFixture();
+    await page.evaluate(() => {
+      const messages = document.querySelector('#messages')!;
+      messages.innerHTML =
+        '<div data-message-author-role="user" data-message-id="user-replace">prompt</div><div data-message-author-role="assistant" data-message-id="assistant-replace" data-message-streaming="true">partial</div>';
+      setTimeout(() => {
+        messages.lastElementChild?.remove();
+        messages.insertAdjacentHTML(
+          'beforeend',
+          '<div data-message-author-role="assistant" data-message-id="assistant-replace">complete</div>',
+        );
+      }, 80);
+    });
+    expect(await adapter.waitForAssistantMessage({ checkpoint: checkpoint('user-replace') })).toBe(
+      'complete',
+    );
+    await page.close();
+  });
+  it('fails closed when send cannot observe a stable outgoing user message ID', async () => {
+    const isolated = await browser.newContext();
+    const page = await isolated.newPage();
+    await page.setContent(
+      '<div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" onclick="document.body.insertAdjacentHTML(\'beforeend\',\'<div data-message-author-role=user>sent</div>\')">Send</button>',
+    );
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'about:blank', 1000, false, [
+      'about:blank',
+    ]);
+    await adapter.connect();
+    await expect(adapter.sendMessage('hello')).rejects.toMatchObject({
+      code: 'CHATGPT_MESSAGE_ID_UNAVAILABLE',
+    });
+    await isolated.close();
+  });
+  it('fails closed when the response has no stable assistant message ID', async () => {
+    const { page, adapter } = await connectedFixture();
+    await page.evaluate(() => {
+      document.querySelector('#messages')!.innerHTML =
+        '<div data-message-author-role="user" data-message-id="user-no-assistant-id">prompt</div><div data-message-author-role="assistant">response</div>';
+    });
+    await expect(
+      adapter.waitForAssistantMessage({ checkpoint: checkpoint('user-no-assistant-id') }),
+    ).rejects.toMatchObject({ code: 'CHATGPT_MESSAGE_ID_UNAVAILABLE' });
+    await page.close();
+  });
+  it('fails when the checkpoint conversation tab is missing', async () => {
+    const { page, adapter } = await connectedFixture();
+    await page.close();
+    await expect(
+      adapter.waitForAssistantMessage({ checkpoint: checkpoint('user-1') }),
+    ).rejects.toMatchObject({ code: 'CHATGPT_CONVERSATION_NOT_FOUND' });
+  });
+  it('rejects ambiguous ChatGPT tabs instead of selecting the first', async () => {
+    const isolated = await browser.newContext();
+    await isolated.newPage();
+    await isolated.newPage();
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'about:blank', 1000, false, [
+      'about:blank',
+    ]);
+    await expect(adapter.connect()).rejects.toMatchObject({ code: 'CHATGPT_TAB_AMBIGUOUS' });
+    await isolated.close();
   });
   it('reports timeout and never returns partial text', async () => {
     const { page, adapter } = await connectedFixture();
     await page.evaluate(() => {
       document.querySelector('#messages')!.innerHTML =
-        '<div data-message-author-role="assistant" data-message-streaming="true">partial</div>';
+        '<div data-message-author-role="user" data-message-id="user-timeout">prompt</div><div data-message-author-role="assistant" data-message-id="assistant-timeout" data-message-streaming="true">partial</div>';
     });
     await expect(
-      adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 100 }),
+      adapter.waitForAssistantMessage({ checkpoint: checkpoint('user-timeout'), timeoutMs: 100 }),
     ).rejects.toMatchObject({ code: 'BRIDGE_TIMEOUT' });
     await page.close();
   });
@@ -145,7 +242,7 @@ describe('ChatGPT adapter fixture', () => {
     await isolated.route('https://chatgpt.com/**', (route) =>
       route.fulfill({
         contentType: 'text/html',
-        body: '<div data-message-author-role="assistant" data-message-streaming="true">partial</div>',
+        body: '<div data-message-author-role="user" data-message-id="user-stream">prompt</div><div data-message-author-role="assistant" data-message-id="assistant-stream" data-message-streaming="true">partial</div>',
       }),
     );
     await isolated.route('https://example.test/**', (route) =>
@@ -172,7 +269,10 @@ describe('ChatGPT adapter fixture', () => {
     );
     const started = Date.now();
     await expect(
-      adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 1500 }),
+      adapter.waitForAssistantMessage({
+        checkpoint: checkpoint('user-stream', 'https://chatgpt.com/c/wait'),
+        timeoutMs: 1500,
+      }),
     ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
     expect(Date.now() - started).toBeLessThan(1000);
     await navigation;
@@ -213,14 +313,17 @@ describe('ChatGPT adapter fixture', () => {
       '<script>setTimeout(()=>location.href="https://example.test/assistant-creation",60)</script>',
     );
     await expect(
-      x.adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 1000 }),
+      x.adapter.waitForAssistantMessage({
+        checkpoint: checkpoint('missing-user', 'https://chatgpt.com/c/adversarial'),
+        timeoutMs: 1000,
+      }),
     ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
     await expectForeignUntouched(x.page);
     await x.isolated.close();
   });
   it('discards extraction when navigation occurs immediately before innerText', async () => {
     const x = await adversarialFixture(
-      '<div id="answer" data-message-author-role="assistant">final</div>',
+      '<div data-message-author-role="user" data-message-id="user-final">prompt</div><div id="answer" data-message-author-role="assistant" data-message-id="assistant-final">final</div>',
     );
     const adapter = new PlaywrightChatGPTWebAdapter(
       x.isolated,
@@ -234,7 +337,10 @@ describe('ChatGPT adapter fixture', () => {
     );
     await adapter.connect();
     await expect(
-      adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 1000 }),
+      adapter.waitForAssistantMessage({
+        checkpoint: checkpoint('user-final', 'https://chatgpt.com/c/adversarial'),
+        timeoutMs: 1000,
+      }),
     ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
     await expectForeignUntouched(x.page);
     await x.isolated.close();

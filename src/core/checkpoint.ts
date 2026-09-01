@@ -1,12 +1,18 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { ChatbridgeError } from './errors.js';
 import { TaskCheckpointSchema, type TaskCheckpoint } from './task.js';
+const MessageIdSchema = z.string().regex(/^[A-Za-z0-9_-]+$/);
 const SessionSchema = z.object({
-  assistantCount: z.number().int().nonnegative(),
+  version: z.literal(2),
+  conversationUrl: z.string().url(),
+  outgoingUserMessageId: MessageIdSchema,
+  previousAssistantMessageId: MessageIdSchema.optional(),
   sentAt: z.string().datetime(),
 });
-export type BridgeSession = z.infer<typeof SessionSchema>;
+export type SendCheckpointV2 = z.infer<typeof SessionSchema>;
+export type BridgeSession = SendCheckpointV2;
 export class SessionStore {
   private readonly file: string;
   constructor(root: string) {
@@ -14,7 +20,13 @@ export class SessionStore {
   }
   async read(): Promise<BridgeSession | undefined> {
     try {
-      return SessionSchema.parse(JSON.parse(await readFile(this.file, 'utf8')));
+      const raw: unknown = JSON.parse(await readFile(this.file, 'utf8'));
+      if (typeof raw === 'object' && raw !== null && 'assistantCount' in raw && !('version' in raw))
+        throw new ChatbridgeError(
+          'Assistant-count checkpoints are stale and unsupported; run send again',
+          'STALE_SEND_CHECKPOINT',
+        );
+      return SessionSchema.parse(raw);
     } catch (e: any) {
       if (e?.code === 'ENOENT') return undefined;
       throw e;

@@ -1,6 +1,6 @@
-import type { BrowserAutomationSession } from './browser-automation-session.js';
+import type { BrowserAutomationSession, WaitOptions } from './browser-automation-session.js';
 import type { BrowserConnection } from './browser-connection.js';
-import { PlaywrightChatGPTWebAdapter, type WaitOptions } from './chatgpt-adapter.js';
+import { PlaywrightChatGPTWebAdapter } from './chatgpt-adapter.js';
 
 export class LibraryChatGPTSession implements BrowserAutomationSession {
   private adapter: PlaywrightChatGPTWebAdapter | undefined;
@@ -30,7 +30,7 @@ export class LibraryChatGPTSession implements BrowserAutomationSession {
   async sendMessage(message: string) {
     return this.required().sendMessage(message);
   }
-  async waitForAssistantMessage(options?: WaitOptions) {
+  async waitForAssistantMessage(options: WaitOptions) {
     return this.required().waitForAssistantMessage(options);
   }
   async close() {

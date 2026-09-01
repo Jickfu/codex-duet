@@ -9,6 +9,7 @@ Status: implementation complete; native existing-session acceptance **MANUAL REQ
 - M1.2 introduced the transport-independent `BrowserAutomationSession`, official Playwright Extension/channel-CDP transports, raw CDP, and ordered fallback.
 - M1.2.1 hardens navigation invalidation, CLI error taxonomy, attach-phase fallback semantics, executable discovery, diagnostics, and compatibility policy.
 - M1.2.2 removes unsupported host-global assumptions from generated CLI sandbox code, adds canonical origin-boundary matching and nonce-bound structured bridge errors, and softens interactive CDP doctor diagnostics.
+- M1.2.3 replaces assistant-count checkpoints with outgoing-user causal identity, exact conversation binding, per-poll message re-querying, and recoverable send-side-effect semantics.
 
 ## Frozen contract candidate
 
@@ -25,3 +26,7 @@ Run [the manual existing-browser E2E](../manual-existing-browser-e2e.md) in a no
 Baseline finding (2026-09-01): Channel CDP successfully attached to the normal Chrome profile and enumerated its existing tabs, but `run-code` exposed neither `URL` nor `globalThis.URL`. This caused the pre-M1.2.2 matcher to reject every page.
 
 Post-fix native result (2026-09-01): attach returned `existing-channel-cdp` and login-state validation succeeded against the existing Chrome session, confirming the sandbox origin fix. The subsequent `send` returned `PLAYWRIGHT_CLI_TIMEOUT`, so no final `wait` payload could be accepted. Detach completed without requesting browser shutdown. The native gate remains MANUAL REQUIRED and M1 is not Frozen; the send timeout requires a separately scoped compatibility diagnosis rather than an unverified DOM-click workaround.
+
+M1.2.3 acceptance requires two consecutive real Channel CDP `send -> wait` rounds anchored by version-2 message IDs, followed by detach with the normal Chrome profile, tabs, and login state intact. Until that exact gate succeeds, status remains MANUAL REQUIRED.
+
+Post-build M1.2.3 attempt (2026-09-01): Chrome no longer exposed an authorized Channel CDP connection, so attach stopped before any send. No two-round result is claimed. Re-enable remote debugging in the normal Chrome session and repeat the documented gate before changing status to Frozen.

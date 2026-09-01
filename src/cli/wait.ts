@@ -6,7 +6,13 @@ export async function wait(parse: boolean, timeout?: number) {
     const session = await r.store.read();
     if (!session) throw new Error('No pending send checkpoint. Run `chatbridge send` first.');
     const text = await r.adapter.waitForAssistantMessage({
-      afterCount: session.assistantCount,
+      checkpoint: {
+        conversationUrl: session.conversationUrl,
+        outgoingUserMessageId: session.outgoingUserMessageId,
+        ...(session.previousAssistantMessageId
+          ? { previousAssistantMessageId: session.previousAssistantMessageId }
+          : {}),
+      },
       ...(timeout ? { timeoutMs: timeout } : {}),
     });
     if (parse) console.log(JSON.stringify(parseEnvelope(text), null, 2));

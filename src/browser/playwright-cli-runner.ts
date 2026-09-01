@@ -39,9 +39,21 @@ export class PlaywrightCliRunner implements PlaywrightCliRunnerLike {
       });
       return { stdout, stderr };
     } catch (error: any) {
-      throw classifyCliFailure(error);
+      const classified = classifyCliFailure(error);
+      if (process.env.CHATBRIDGE_DEBUG === '1')
+        console.error(`[DEBUG] ${formatCliDiagnostic(error, classified.code)}`);
+      throw classified;
     }
   }
+}
+
+export function formatCliDiagnostic(error: any, category: string): string {
+  const exitCode = typeof error?.code === 'number' ? error.code : 'unknown';
+  const signal = typeof error?.signal === 'string' ? error.signal : 'none';
+  const errorClass =
+    typeof error?.constructor?.name === 'string' ? error.constructor.name : 'UnknownError';
+  const timedOut = Boolean(error?.killed || error?.code === 'ETIMEDOUT');
+  return `category=${category} exitCode=${exitCode} signal=${signal} killed=${Boolean(error?.killed)} processTimeout=${timedOut} errorClass=${errorClass}`;
 }
 
 export function classifyCliFailure(error: any): ChatbridgeError {

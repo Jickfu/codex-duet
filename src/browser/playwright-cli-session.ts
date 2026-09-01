@@ -1,9 +1,18 @@
 import { randomBytes } from 'node:crypto';
 import { BridgeTimeoutError, ChatbridgeError } from '../core/errors.js';
-import type { BrowserAutomationSession } from './browser-automation-session.js';
-import { buildCliOperation } from './chatgpt-rules.js';
-import type { WaitOptions } from './chatgpt-adapter.js';
+import type {
+  BrowserAutomationSession,
+  SendMarker,
+  WaitOptions,
+} from './browser-automation-session.js';
+import { buildCliOperation, type CliOperation } from './chatgpt-rules.js';
 import type { PlaywrightCliRunnerLike } from './playwright-cli-runner.js';
+
+interface SendPreparation {
+  conversationUrl: string;
+  previousUserMessageId?: string;
+  previousAssistantMessageId?: string;
+}
 
 export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
   constructor(
@@ -22,26 +31,51 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
   async isLoggedIn() {
     return Boolean((await this.operation({ kind: 'login' })).value);
   }
-  async sendMessage(message: string) {
+  async sendMessage(message: string): Promise<SendMarker> {
     if (!message.trim()) throw new ChatbridgeError('Message must not be empty', 'EMPTY_MESSAGE');
-    return Number((await this.operation({ kind: 'send', message })).value);
-  }
-  async waitForAssistantMessage(options: WaitOptions = {}) {
-    if (options.afterCount === undefined)
+    const prepared = (await this.operation({ kind: 'prepare' })).value as SendPreparation;
+    const commit: CliOperation = { kind: 'commit', message, ...prepared };
+    try {
+      return (await this.operation(commit, 30_000, 'send')).value as SendMarker;
+    } catch (error) {
+      if (!(error instanceof ChatbridgeError) || error.code !== 'PLAYWRIGHT_CLI_TIMEOUT')
+        throw error;
+      const recovered = (
+        await this.operation(
+          {
+            kind: 'recover',
+            conversationUrl: prepared.conversationUrl,
+            ...(prepared.previousUserMessageId
+              ? { previousUserMessageId: prepared.previousUserMessageId }
+              : {}),
+            ...(prepared.previousAssistantMessageId
+              ? { previousAssistantMessageId: prepared.previousAssistantMessageId }
+              : {}),
+          },
+          10_000,
+          'send-recovery',
+        )
+      ).value;
+      if (recovered) return recovered as SendMarker;
       throw new ChatbridgeError(
-        'CLI wait requires the send checkpoint assistant count',
-        'MISSING_ASSISTANT_COUNT',
+        'Send may have had a side effect, but no new user message identity could be confirmed; do not retry automatically',
+        'SEND_OUTCOME_UNKNOWN',
       );
+    }
+  }
+  async waitForAssistantMessage(options: WaitOptions) {
+    const timeout = options.timeoutMs ?? this.timeoutMs;
     try {
       return String(
         (
           await this.operation(
             {
               kind: 'wait',
-              afterCount: options.afterCount,
-              timeoutMs: options.timeoutMs ?? this.timeoutMs,
+              conversationUrl: options.checkpoint.conversationUrl,
+              outgoingUserMessageId: options.checkpoint.outgoingUserMessageId,
+              timeoutMs: timeout,
             },
-            (options.timeoutMs ?? this.timeoutMs) + 2000,
+            timeout + 5000,
           )
         ).value,
       );
@@ -54,16 +88,25 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
   async close() {
     await this.runner.run([`--session=${this.session}`, 'detach'], 5000);
   }
-  private async operation(op: Parameters<typeof buildCliOperation>[0], timeout?: number) {
+  private async operation(op: CliOperation, timeout?: number, phase: string = op.kind) {
     const nonce = randomBytes(16).toString('hex');
-    const result = await this.runner.run(
-      [
-        `--session=${this.session}`,
-        'run-code',
-        buildCliOperation(op, this.url, this.origins, nonce),
-      ],
-      timeout,
-    );
+    let result;
+    try {
+      result = await this.runner.run(
+        [
+          `--session=${this.session}`,
+          'run-code',
+          buildCliOperation(op, this.url, this.origins, nonce),
+        ],
+        timeout,
+      );
+    } catch (error) {
+      if (process.env.CHATBRIDGE_DEBUG === '1') {
+        const code = error instanceof ChatbridgeError ? error.code : 'UNKNOWN';
+        console.error(`[DEBUG] Playwright CLI phase=${phase} category=${code}`);
+      }
+      throw error;
+    }
     const errorMatch = result.stdout.match(new RegExp(`CHATBRIDGE_ERROR_${nonce}_([A-Fa-f0-9]+)`));
     if (errorMatch) {
       try {
@@ -100,11 +143,15 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
       typeof envelope === 'object' && envelope !== null && 'code' in envelope
         ? String(envelope.code)
         : '';
-    if (code === 'ORIGIN_DENIED')
-      throw new ChatbridgeError('Page navigated outside the allowlisted origin', code);
+    const messages: Record<string, string> = {
+      ORIGIN_DENIED: 'Page navigated outside the allowlisted origin',
+      CHATGPT_DOCUMENT_MISSING: 'ChatGPT document root is unavailable',
+      CHATGPT_MESSAGE_ID_UNAVAILABLE: 'ChatGPT did not expose a stable message identity',
+      CHATGPT_TAB_AMBIGUOUS: 'Multiple ChatGPT tabs are available and no current tab is defined',
+      CHATGPT_CONVERSATION_NOT_FOUND: 'The checkpoint conversation tab is not available',
+    };
     if (code === 'BRIDGE_TIMEOUT') throw new BridgeTimeoutError('Browser operation timed out');
-    if (code === 'CHATGPT_DOCUMENT_MISSING')
-      throw new ChatbridgeError('ChatGPT document root is unavailable', code);
+    if (code in messages) throw new ChatbridgeError(messages[code]!, code);
     throw new ChatbridgeError('Invalid structured bridge error', 'CLI_RESULT_INVALID');
   }
 }

@@ -8,8 +8,8 @@ export async function send(messageFile: string) {
       throw new Error(
         'ChatGPT is not logged in. Run `chatbridge browser open`, log in manually, then retry.',
       );
-    const assistantCount = await r.adapter.sendMessage(message);
-    await r.store.write({ assistantCount, sentAt: new Date().toISOString() });
+    const marker = await r.adapter.sendMessage(message);
+    await r.store.write({ version: 2, ...marker, sentAt: new Date().toISOString() });
     console.log('Message sent.');
   } finally {
     await r.connection.close();

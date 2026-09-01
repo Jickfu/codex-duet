@@ -6,6 +6,8 @@ The managed browser profile is isolated under `.chatbridge/profile` and excluded
 
 Existing-browser attachment has a larger trust surface. A mandatory origin policy defaults to `https://chatgpt.com`. Discovery may enumerate page URLs, but adapter operations reject other origins before locator access or page evaluation. The bridge does not read non-ChatGPT DOM, cookies, local/session storage, storage state, or authentication data, and detach never closes the user's browser. Managed mode never uses the user's default Chrome/Edge profile.
 
+Long-running operations race against a main-frame navigation guard. Crossing the allowlisted origin aborts before further locator, evaluation, click, fill, streaming inspection, or text extraction. Agent CLI stdout/snapshots are captured by the runner and never returned through the control plane; only structured results or redacted errors escape.
+
 The future LOCAL MCP boundary is permanently read-only for workspace content. Its independent sensitive-file policy must deny `.env`, key material, SSH/cloud credentials, and secret/token/password-like files by default. It must enforce canonical workspace-root containment, traversal and symlink-escape prevention, request/response limits, task/iteration validation, and state-transition validation. `submit_response` may write only internal task state outside the workspace content surface. No write, delete, shell, exec, commit, or push tool is permitted.
 
 The GITHUB mode does not expose a local workspace or run a local bridge/tunnel. Reviews identify immutable commit SHAs.

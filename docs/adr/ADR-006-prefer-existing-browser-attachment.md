@@ -4,11 +4,11 @@ Status: Accepted
 
 ## Context
 
-Requiring every user to download Playwright Chromium and log in again creates avoidable setup cost. Existing Chrome/Edge sessions may already contain a valid ChatGPT login. Playwright publicly supports Chromium attachment over CDP and offers extension attachment through its Agent CLI, but does not currently expose that extension transport as a BrowserContext Library API.
+Requiring every user to download Playwright Chromium and log in again creates avoidable setup cost. The official Playwright Agent CLI supports Extension and channel-CDP attachment to everyday Chrome/Edge sessions.
 
 ## Decision
 
-Runtime priority is attachable existing Chrome/Edge, installed Chrome/Edge with a codex-duet dedicated profile, then already-installed bundled Chromium. Browser downloads are never silent. Existing attachment uses Playwright's public `connectOverCDP`; private extension protocols and CLI-state parsing are prohibited. Extension transport will be added when a stable public interface can preserve the typed BrowserConnection/ChatGPTWebAdapter boundary.
+Runtime priority is Extension Chrome/Edge, channel-CDP Chrome/Edge, explicit raw CDP, installed Chrome/Edge with a dedicated profile, then bundled Chromium. Existing attachment uses the pinned official Agent CLI. Private extension protocols and CLI session-file inspection are prohibited.
 
 ## Security consequences
 

@@ -1,69 +1,66 @@
 import path from 'node:path';
 import process from 'node:process';
-import { PlaywrightChatGPTWebAdapter } from '../browser/chatgpt-adapter.js';
-import { ExistingBrowserConnection } from '../browser/existing-browser-connection.js';
 import {
   detectInstalledChannel,
-  endpointPages,
   isBundledInstalled,
   isEndpointReachable,
 } from '../browser/managed-browser.js';
+import {
+  PlaywrightCliRunner,
+  type PlaywrightCliRunnerLike,
+} from '../browser/playwright-cli-runner.js';
 import { RuntimeStore } from '../browser/runtime-store.js';
-import { loadConfig } from '../config/config.js';
 
-export async function doctor() {
-  const c = loadConfig();
-  const [chromeInstalled, edgeInstalled, bundled, chromeAttach, edgeAttach, runtime] =
-    await Promise.all([
-      detectInstalledChannel('chrome'),
-      detectInstalledChannel('msedge'),
-      isBundledInstalled(),
-      isEndpointReachable(c.existingChromeEndpoint),
-      isEndpointReachable(c.existingEdgeEndpoint),
-      new RuntimeStore(path.resolve(process.cwd(), '.chatbridge')).read(),
-    ]);
-  const chromePages = chromeAttach ? await endpointPages(c.existingChromeEndpoint) : [];
-  const edgePages = edgeAttach ? await endpointPages(c.existingEdgeEndpoint) : [];
-  let readiness = 'not checked';
-  if (runtime && (await isEndpointReachable(runtime.endpoint))) {
-    try {
-      const connection = new ExistingBrowserConnection(runtime.endpoint);
-      const adapter = new PlaywrightChatGPTWebAdapter(
-        await connection.connect(),
-        c.chatgptUrl,
-        3000,
-        c.debug,
-        c.allowedOrigins,
-      );
-      await adapter.connect();
-      readiness = (await adapter.isLoggedIn()) ? 'ready' : 'manual login required';
-      await connection.close();
-    } catch {
-      readiness = 'attached runtime is not ready';
-    }
-  }
-  console.log(`Detected Chrome: ${chromeInstalled ? 'yes' : 'no'}`);
-  console.log(`Detected Edge: ${edgeInstalled ? 'yes' : 'no'}`);
+export async function doctor(options: { endpoint?: string } = {}) {
+  const runner = new PlaywrightCliRunner();
+  const chromeExtension = await probe(runner, 'doctor-ext-chrome', '--extension=chrome');
+  const edgeExtension = await probe(runner, 'doctor-ext-edge', '--extension=msedge');
+  const chromeChannel = await probe(runner, 'doctor-cdp-chrome', '--cdp=chrome');
+  const edgeChannel = await probe(runner, 'doctor-cdp-edge', '--cdp=msedge');
+  const [chromeInstalled, edgeInstalled, bundled, runtime] = await Promise.all([
+    detectInstalledChannel('chrome'),
+    detectInstalledChannel('msedge'),
+    isBundledInstalled(),
+    new RuntimeStore(path.resolve(process.cwd(), '.chatbridge')).read(),
+  ]);
+  const raw = options.endpoint ? await isEndpointReachable(options.endpoint) : undefined;
+  const recommended = chromeExtension
+    ? 'extension/chrome'
+    : edgeExtension
+      ? 'extension/msedge'
+      : chromeChannel
+        ? 'cdp/chrome'
+        : edgeChannel
+          ? 'cdp/msedge'
+          : chromeInstalled
+            ? 'managed/chrome'
+            : edgeInstalled
+              ? 'managed/msedge'
+              : bundled
+                ? 'bundled'
+                : 'unavailable';
+  console.log(`Extension Chrome: ${chromeExtension ? 'available' : 'unavailable'}`);
+  console.log(`Extension Edge: ${edgeExtension ? 'available' : 'unavailable'}`);
+  console.log(`Channel CDP Chrome: ${chromeChannel ? 'attachable' : 'not authorized'}`);
+  console.log(`Channel CDP Edge: ${edgeChannel ? 'attachable' : 'not authorized'}`);
   console.log(
-    `Existing Chrome attachment: ${chromeAttach ? 'available' : 'unavailable'}; ChatGPT tab: ${hasChatGPT(chromePages) ? 'yes' : 'no'}`,
+    `Raw CDP endpoint: ${options.endpoint ? `${options.endpoint} ${raw ? 'reachable' : 'unreachable'}` : 'not specified'}`,
   );
-  console.log(
-    `Existing Edge attachment: ${edgeAttach ? 'available' : 'unavailable'}; ChatGPT tab: ${hasChatGPT(edgePages) ? 'yes' : 'no'}`,
-  );
-  console.log(`Selected mode: ${runtime?.mode ?? 'none'}`);
-  console.log(`Selected browser: ${runtime?.browser ?? 'none'}`);
-  console.log(`ChatGPT session: ${readiness}`);
+  console.log(`Managed Chrome installed: ${chromeInstalled ? 'yes' : 'no'}`);
+  console.log(`Managed Edge installed: ${edgeInstalled ? 'yes' : 'no'}`);
   console.log(`Bundled Chromium: ${bundled ? 'installed' : 'not installed'}`);
+  console.log(`Selected mode: ${runtime?.mode ?? 'none'}`);
+  console.log(`Recommended mode: ${recommended}`);
   console.log(
-    'Extension transport: official Agent CLI only; BrowserContext integration unavailable',
+    'Installed-browser detection uses a short official Playwright channel launch probe; it closes the temporary browser and profile immediately.',
   );
 }
-function hasChatGPT(urls: string[]) {
-  return urls.some((url) => {
-    try {
-      return new URL(url).origin === 'https://chatgpt.com';
-    } catch {
-      return false;
-    }
-  });
+async function probe(runner: PlaywrightCliRunnerLike, session: string, argument: string) {
+  try {
+    await runner.run([`--session=${session}`, 'attach', argument], 3000);
+    await runner.run([`--session=${session}`, 'detach'], 3000).catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
 }

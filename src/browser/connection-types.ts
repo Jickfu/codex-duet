@@ -2,12 +2,15 @@ export const browserKinds = ['auto', 'chrome', 'msedge', 'bundled'] as const;
 export type BrowserKind = (typeof browserKinds)[number];
 export const transportKinds = ['auto', 'extension', 'cdp'] as const;
 export type TransportKind = (typeof transportKinds)[number];
-export type ConnectionMode = 'existing-cdp' | 'managed-installed' | 'bundled';
+export type ConnectionMode =
+  'existing-extension' | 'existing-channel-cdp' | 'raw-cdp' | 'managed-installed' | 'bundled';
 
 export interface RuntimeSelection {
   mode: ConnectionMode;
   browser: Exclude<BrowserKind, 'auto'>;
-  endpoint: string;
+  transport: 'cli' | 'library';
+  endpoint?: string | undefined;
+  session?: string | undefined;
   attachedAt: string;
 }
 

@@ -27,8 +27,8 @@ Browser-internal data is not model context. Waiting, selector fallback, streamin
 
 M1 atomically records the assistant-message count before send. This makes a later `wait` target the corresponding new response after CLI restart. Full task checkpoints and exactly-once execution belong to M3; browser timeout must never imply that Codex should repeat code modifications.
 
-## M1.1 connection strategy
+## M1.2 transport-independent automation
 
-Transport and DOM remain separated. `ExistingBrowserConnection` attaches through public CDP and only detaches; `ManagedBrowserConnection` represents installed Chrome/Edge launched through official Playwright channels with a dedicated profile; `BundledBrowserConnection` is the testing/fallback variant. Selection is persisted independently of message checkpoints.
+`BrowserAutomationSession` is consumed by send/wait. `LibraryChatGPTSession` and `PlaywrightCliChatGPTSession` implement it; `BrowserContext` remains internal to the Library transport. Shared `chatgpt-rules` is the single source of selector, streaming, target-message, composer, and origin semantics.
 
-Auto selection prefers an existing Chrome/Edge endpoint with a ChatGPT tab, then other attachable Chrome/Edge endpoints, installed Chrome, installed Edge, and finally an already-installed bundled Chromium. No browser download occurs automatically.
+Auto selection is Extension Chrome, Extension Edge, channel-CDP Chrome, channel-CDP Edge, explicit raw CDP, installed Chrome, installed Edge, then already-installed bundled Chromium. No browser download occurs automatically.

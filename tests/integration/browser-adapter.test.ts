@@ -62,6 +62,13 @@ describe('ChatGPT adapter fixture', () => {
     expect(await page.evaluate(() => (window as any).sent)).toBe('hello');
     await page.close();
   });
+  it('does not leak navigation guards across long-running operations', async () => {
+    const { page, adapter } = await connectedFixture();
+    const before = (page as any).listenerCount('framenavigated');
+    for (let i = 0; i < 10; i++) await adapter.sendMessage(`message-${i}`);
+    expect((page as any).listenerCount('framenavigated')).toBe(before);
+    await page.close();
+  });
   it('waits through streaming and returns only the new final message', async () => {
     const { page, adapter } = await connectedFixture();
     await page.evaluate(() => {
@@ -103,5 +110,43 @@ describe('ChatGPT adapter fixture', () => {
       adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 100 }),
     ).rejects.toMatchObject({ code: 'BRIDGE_TIMEOUT' });
     await page.close();
+  });
+  it('aborts immediately when a streaming wait navigates across origins', async () => {
+    const isolated = await browser.newContext();
+    await isolated.route('https://chatgpt.com/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<div data-message-author-role="assistant" data-message-streaming="true">partial</div>',
+      }),
+    );
+    await isolated.route('https://example.test/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<div data-message-author-role="assistant">foreign secret</div>',
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/wait');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 2000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    const navigation = new Promise<void>((resolve) =>
+      setTimeout(
+        () =>
+          void page.goto('https://example.test/escape').then(
+            () => resolve(),
+            () => resolve(),
+          ),
+        50,
+      ),
+    );
+    const started = Date.now();
+    await expect(
+      adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 1500 }),
+    ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
+    expect(Date.now() - started).toBeLessThan(1000);
+    await navigation;
+    await isolated.close();
   });
 });

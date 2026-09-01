@@ -7,10 +7,11 @@ import { send } from './send.js';
 import { wait } from './wait.js';
 import { status } from './status.js';
 import { doctor } from './doctor.js';
+import { detach } from './detach.js';
 const program = new Command()
   .name('chatbridge')
   .description('Deterministic ChatGPT Web browser bridge')
-  .version('0.1.1')
+  .version('0.1.2')
   .option('--debug', 'print bridge diagnostics without authentication data')
   .hook('preAction', (command) => {
     if (command.opts().debug) process.env.CHATBRIDGE_DEBUG = '1';
@@ -37,10 +38,18 @@ browser
   .action(async (o: { browser: BrowserKind; transport: TransportKind; endpoint?: string }) => {
     const selected = await attachBrowser(loadConfig(), o);
     console.log(JSON.stringify(selected, null, 2));
-    if (selected.mode !== 'existing-cdp')
+    if (selected.mode === 'managed-installed' || selected.mode === 'bundled')
       console.log('Log in to ChatGPT manually in the dedicated browser profile if needed.');
   });
-browser.command('doctor').description('Check local browser prerequisites').action(doctor);
+browser
+  .command('doctor')
+  .description('Check local browser prerequisites')
+  .option('--endpoint <url>', 'raw CDP endpoint to diagnose')
+  .action(doctor);
+browser
+  .command('detach')
+  .description('Detach without closing an existing user browser')
+  .action(detach);
 program
   .command('send')
   .requiredOption('--message-file <path>')

@@ -6,7 +6,7 @@
 
 ChatGPT Web is the planner, architect, and reviewer. Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries control messages without feeding screenshots, DOM snapshots, chat history, or polling loops into the model context.
 
-This release implements **M0**, **M1**, and **M1.1 Existing Browser Support** only. GitHub automation, Local MCP, cloudflared, and the durable orchestrator are deliberately not implemented.
+This release implements through **M1.2 Native Existing Session** only. GitHub automation, Local MCP, cloudflared, and the durable orchestrator are deliberately not implemented.
 
 ## Install
 
@@ -18,11 +18,13 @@ pnpm build
 pnpm link --global
 ```
 
-## Recommended browser setup
+## Recommended: Extension Existing Session
 
-The bridge first looks for an already-running Chrome or Edge exposed through an official CDP endpoint, then uses installed Chrome or Edge with a dedicated codex-duet profile. A second Chromium download is not required for normal use.
+Install and enable the official Playwright Extension in everyday Chrome or Edge, keep the existing ChatGPT tab logged in, then run `chatbridge browser doctor` and `chatbridge browser attach`. This reuses tabs, cookies, SSO/2FA, and login state without creating a second profile or downloading Chromium. The official Agent CLI is pinned as a dependency; codex-duet never uses runtime `npx` downloads.
 
-For existing-browser CDP attachment, start Chrome or Edge yourself with remote debugging on a loopback port and keep ChatGPT logged in. Modern Chrome requires a non-default user-data directory for remote debugging; codex-duet never restarts or automates your normal default profile.
+## Alternative: Channel CDP Existing Session
+
+In normal Chrome or Edge, open `chrome://inspect/#remote-debugging`, enable “Allow remote debugging for this browser instance”, then use `chatbridge browser attach --transport cdp --browser chrome` or `--browser msedge`. Advanced raw endpoints remain available through `--endpoint`.
 
 ```text
 chatbridge browser doctor
@@ -33,7 +35,7 @@ chatbridge browser attach --browser msedge --transport cdp --endpoint http://127
 
 If no attachable browser is found, `attach` starts installed Chrome and then Edge through Playwright's official browser channels, using `.chatbridge/profile`. Log in manually the first time. The bridge never reads, exports, or logs passwords, cookies, tokens, or browser storage.
 
-Playwright extension attachment is currently exposed through its Agent CLI, not a public `BrowserContext` Library API. `--transport extension` gives a clear diagnostic rather than using a private protocol.
+If native attachment is unavailable, auto mode starts installed Chrome then Edge with a dedicated `.chatbridge/profile`; it never automates the daily browser's default profile.
 
 ## Bundled browser fallback and development
 
@@ -43,6 +45,8 @@ Bundled Chromium remains the fixture/CI browser and an explicit fallback. It is 
 pnpm exec playwright install chromium
 chatbridge browser attach --browser bundled
 ```
+
+`chatbridge browser detach` releases an existing session without closing the user's browser or tabs.
 
 ## Send and wait
 
@@ -62,7 +66,7 @@ chatbridge status
 - Browser automation uses the public ChatGPT UI and official Playwright APIs, never private or reverse-engineered APIs.
 - Existing-browser automation has a mandatory origin allowlist; non-ChatGPT tabs are not inspected or operated.
 - Login is manual. The isolated profile is local and must remain uncommitted.
-- M1.1 supports one selected runtime and one outstanding send checkpoint per project.
+- M1.2 supports one selected runtime and one outstanding send checkpoint per project.
 - ChatGPT UI changes can require updates to the centralized adapter selectors.
 - Real ChatGPT E2E is manual; CI fixtures are local and require no account.
 - LOCAL read-only MCP and GITHUB data-plane workflows are architecture-only until later milestones.

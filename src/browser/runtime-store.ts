@@ -1,14 +1,29 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { RuntimeSelection } from './connection-types.js';
 
-const RuntimeSchema = z.object({
-  mode: z.enum(['existing-cdp', 'managed-installed', 'bundled']),
-  browser: z.enum(['chrome', 'msedge', 'bundled']),
-  endpoint: z.string().url(),
-  attachedAt: z.string().datetime(),
-});
+const RuntimeSchema = z
+  .object({
+    mode: z.enum([
+      'existing-extension',
+      'existing-channel-cdp',
+      'raw-cdp',
+      'managed-installed',
+      'bundled',
+    ]),
+    browser: z.enum(['chrome', 'msedge', 'bundled']),
+    transport: z.enum(['cli', 'library']),
+    endpoint: z.string().url().optional(),
+    session: z.string().min(1).optional(),
+    attachedAt: z.string().datetime(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.transport === 'cli' && !value.session)
+      ctx.addIssue({ code: 'custom', message: 'CLI runtime requires session' });
+    if (value.transport === 'library' && !value.endpoint)
+      ctx.addIssue({ code: 'custom', message: 'Library runtime requires endpoint' });
+  });
 export class RuntimeStore {
   private file: string;
   constructor(root: string) {
@@ -28,5 +43,8 @@ export class RuntimeStore {
     const tmp = `${this.file}.${process.pid}.tmp`;
     await writeFile(tmp, JSON.stringify(parsed, null, 2));
     await rename(tmp, this.file);
+  }
+  async clear() {
+    await rm(this.file, { force: true });
   }
 }

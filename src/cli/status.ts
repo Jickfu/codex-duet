@@ -12,7 +12,10 @@ export async function status() {
   console.log(
     JSON.stringify(
       {
-        browser: runtime && (await isEndpointReachable(runtime.endpoint)) ? 'running' : 'stopped',
+        browser:
+          runtime && (runtime.transport === 'cli' || (await isEndpointReachable(runtime.endpoint!)))
+            ? 'running'
+            : 'stopped',
         runtime: runtime ?? null,
         profileDir: c.profileDir,
         pending: session ?? null,

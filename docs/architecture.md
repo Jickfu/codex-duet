@@ -1,55 +1,118 @@
 # Architecture
 
-## Responsibility boundary
+## Product roles
 
-ChatGPT Web plans and reviews; Codex executes. ChatGPT must never edit local files, run shell commands, commit, push, or cause other workspace side effects. The public C2C protocol and state machine do not depend on a particular local bridge implementation.
-
-## Planes and modes
-
-The **Control Plane** carries small machine-readable lifecycle messages. The **Data Plane** gives ChatGPT read-only access to the code context without copying large source trees or diffs through Codex context.
-
-In **LOCAL mode**, Codex sends control messages through Playwright. A future remote MCP endpoint backed by a local read-only bridge provides the data plane and returns `submit_response` events to Codex. Codex does not poll the page for replies. In **GITHUB mode**, the ChatGPT GitHub integration is the data plane and Playwright carries control messages in both directions. Review identity uses immutable base and review commit SHAs, not only branch names.
-
-M0/M1 implements the shared protocol/state machine and deterministic browser transport. M2 adds the GitHub code provider; orchestration remains a future milestone.
-
-## Components
-
-- `core`: shared task/test domain, mode-aware protocol and checkpoints, state transitions, and errors. Core never imports the GitHub implementation layer.
-- `browser`: connection abstraction, managed Chromium lifecycle, centralized ChatGPT adapter, response waiter.
-- `cli`: small commands that return only status or the requested final payload.
-- `providers`: mode-aware `CodeProvider` contracts expressed as LOCAL/GITHUB discriminated unions.
-- `github`: `GitHubCodeProvider`, GitHub remote parsing, immutable review-envelope construction, and deterministic `GitRunner` integration.
-
-## Code provider and capability layers
-
-`CodeProvider` prepares a mode-specific code context and review target. `GitHubCodeProvider` implements this contract for M2; a minimal LOCAL type reserves the discriminator without implementing Local MCP or guessing its future workspace fields.
-
-The provider layers are:
+The primary product path is:
 
 ```text
-core shared domain
-        ↑
-CodeProvider contract
-        ↑
-GitHubCodeProvider
-        ↓
-GitRunner / git CLI
+User
+  ↓
+Codex Desktop
+  ↓
+codex-duet Skill
+  ↓
+Codex = Outer Orchestrator + Sole Executor
+  ↓
+ChatGPT Web = Planner + Architect + Reviewer
 ```
 
-`GitRunner` and the system Git CLI remain authoritative for correctness-critical local repository state and Git transport: status, HEAD, branches, ancestry, push, and remote-SHA verification.
+Codex Desktop accepts and normalizes the user's request, invokes deterministic `chatbridge` primitives, applies the approved plan, runs tests, commits when the selected mode requires it, fixes review findings, asks the user when work is `BLOCKED`, and summarizes the result after `DONE`. Codex is the only workspace executor.
 
-GitHub Platform capabilities are a separate future boundary for PRs, checks, workflows, comments, and platform metadata. Possible future backends include a structured Codex GitHub plugin, `gh`, or GitHub REST. None is selected or implemented in M2. A natural-language LLM interaction whose output must be parsed is not a deterministic infrastructure primitive and cannot replace Local Git.
+ChatGPT Web plans, designs, and reviews. It does not modify the workspace, execute shell commands, commit, or push. `chatbridge` supplies deterministic infrastructure: the C2C protocol, state validation, Browser Control Plane, GITHUB task/ref safety, the planned LOCAL read-only MCP bridge, and durable orchestration guards. It does not replace Codex reasoning.
 
-## Token efficiency
+The main product path depends on Codex Desktop, not Codex CLI or the Codex SDK. A future headless Codex SDK integration may be an optional mode, but it must not change these responsibilities.
 
-Browser-internal data is not model context. Waiting, selector fallback, streaming detection, and text extraction run in TypeScript. The bridge returns only the current complete control payload. Source and large diffs belong on the relevant data plane; full test logs do not belong on the browser control plane.
+## Control Plane and Data Plane
 
-## Recovery
+All modes share the Browser Control Plane:
 
-M1 atomically records the assistant-message count before send. This makes a later `wait` target the corresponding new response after CLI restart. Full task checkpoints and exactly-once execution belong to M3; browser timeout must never imply that Codex should repeat code modifications.
+```mermaid
+flowchart LR
+    C[Codex Desktop] -->|compact C2C| B[Browser Bridge / Playwright]
+    B --> W[ChatGPT Web]
+```
 
-## M1.2 transport-independent automation
+It carries `PLANNING`, `PLAN`, `EXECUTED`, `REVIEW`, `DONE`, `BLOCKED`, and compact C2C metadata. It never carries a repository archive, large diff, DOM snapshot, accessibility tree, browser storage, or other bulk code context. Browser Bridge is the Control Plane and this boundary is the Frozen M1 contract.
 
-`BrowserAutomationSession` is consumed by send/wait. `LibraryChatGPTSession` and `PlaywrightCliChatGPTSession` implement it; `BrowserContext` remains internal to the Library transport. Shared `chatgpt-rules` is the single source of selector, streaming, target-message, composer, and origin semantics.
+The code Data Plane is mode-specific:
 
-Auto selection is Extension Chrome, Extension Edge, channel-CDP Chrome, channel-CDP Edge, explicit raw CDP, installed Chrome, installed Edge, then already-installed bundled Chromium. No browser download occurs automatically.
+```mermaid
+flowchart TB
+    C[Codex Desktop] -->|Control: compact C2C| B[Browser Bridge]
+    B --> W[ChatGPT Web]
+    W -->|GITHUB Data Plane| G[GitHub]
+    W -.->|LOCAL Data Plane: MCP reads, planned M4/M5| M[Local Workspace]
+```
+
+GITHUB mode uses GitHub. LOCAL mode will use a read-only MCP endpoint. Source and large diffs belong on the selected Data Plane, never the Browser Control Plane.
+
+See [Data planes](data-plane.md), [GITHUB mode](github-mode.md), and [LOCAL mode](local-mode.md).
+
+## Mode/provider architecture
+
+```mermaid
+flowchart TB
+    O[Orchestrator / Skill<br/>PLANNED M3]
+    O --> B[Browser Control<br/>FROZEN M1]
+    O --> C[CodeProvider]
+    C --> L[LocalCodeProvider<br/>PLANNED M4]
+    C --> G[GitHubCodeProvider<br/>FROZEN M2]
+    L --> M[Local read-only MCP Bridge<br/>PLANNED M4]
+    G --> Git[GitRunner / system Git / GitHub]
+```
+
+Both providers plug into one C2C/state-machine/orchestration core. There must not be separate orchestration engines for LOCAL and GITHUB modes.
+
+`GitRunner` and the system Git CLI remain authoritative for correctness-critical local Git state and transport: status, branch, `HEAD`, ancestry, task-branch creation, push, and remote-SHA verification. GitHub Platform features such as pull requests, checks, workflows, and comments remain a separate future capability boundary.
+
+## Current and planned status
+
+| Component                                          | Status                      |
+| -------------------------------------------------- | --------------------------- |
+| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0** |
+| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1** |
+| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2** |
+| Codex Skill and durable orchestration              | **PLANNED M3**              |
+| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**              |
+| `submit_response` MCP return path                  | **PLANNED M4**              |
+| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**          |
+| cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**              |
+| Hardening, packaging, and distribution             | **PLANNED M6**              |
+
+M3 can first complete the loop in GITHUB mode. A complete LOCAL loop depends on M4 and M5.
+
+## Roadmap ownership
+
+| Milestone | Ownership                                   |
+| --------- | ------------------------------------------- |
+| M0        | Protocol / State Machine                    |
+| M1        | Browser Control Plane — **FROZEN**          |
+| M2        | GitHub Data Plane — **FROZEN**              |
+| M3        | Codex Skill + Orchestration                 |
+| M4        | Local Read-Only MCP Data Plane              |
+| M5        | cloudflared lifecycle / remote MCP exposure |
+| M6        | hardening / packaging / distribution        |
+
+## Architecture Invariants
+
+Every future milestone must preserve these invariants:
+
+1. Codex is the only Executor.
+2. ChatGPT is only the Planner, Architect, and Reviewer.
+3. Browser Bridge belongs only to the Control Plane.
+4. The Browser Control Plane does not carry bulk code data.
+5. The GITHUB code Data Plane is GitHub.
+6. The LOCAL code Data Plane is read-only MCP.
+7. cloudflared belongs only to LOCAL Data Plane transport.
+8. ChatGPT cannot modify the workspace through MCP.
+9. GITHUB formal review is immutable `BASE_REF..REVIEW_REF`.
+10. LOCAL mode does not require commit or push.
+11. GITHUB and LOCAL share one C2C/state-machine/orchestration core.
+12. The project does not implement two independent orchestration engines.
+13. Codex Desktop is the primary product's outer orchestrator.
+14. The primary product path does not depend on Codex CLI or the Codex SDK.
+15. A future headless Codex SDK mode is optional and cannot alter the primary architecture.
+
+## Recovery and token efficiency
+
+Browser-internal waiting, selector fallback, streaming detection, and text extraction stay inside deterministic TypeScript infrastructure. M1 stores a causal send checkpoint and returns only the complete assistant control payload. A timeout never authorizes Codex to repeat code modifications. Full task checkpoints and exactly-once execution belong to M3.

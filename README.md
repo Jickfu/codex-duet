@@ -4,9 +4,22 @@
 
 > ChatGPT thinks and reviews. Codex acts.
 
-ChatGPT Web is the planner, architect, and reviewer. Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries control messages without feeding screenshots, DOM snapshots, chat history, or polling loops into the model context.
+ChatGPT Web is the planner, architect, and reviewer. Codex Desktop is the outer orchestrator, and Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries compact control messages without feeding screenshots, DOM snapshots, chat history, repositories, or large diffs into the model context.
 
 This release includes the **Frozen M2 GitHub Mode MVP** data plane. Its frozen implementation baseline is `f4b1dd012f79b8a6522f56d40d46f7af39a14923`. Local MCP, cloudflared, PR automation, and the durable orchestrator are deliberately not implemented.
+
+## Architecture summary
+
+```text
+Codex          = Execute
+ChatGPT Web    = Plan + Architect + Review
+Browser Bridge = Shared Control Plane
+
+GITHUB mode → GitHub Data Plane
+LOCAL mode  → Read-only MCP Data Plane (planned M4/M5)
+```
+
+GITHUB mode is implemented and frozen at M2. The Codex Skill/orchestrator is planned for M3; LOCAL MCP and `submit_response` are planned for M4; cloudflared lifecycle is planned for M5. Both modes share one C2C/state-machine/orchestration core. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), and [LOCAL mode](docs/local-mode.md).
 
 ## Install
 
@@ -85,4 +98,4 @@ The worktree must be clean at initialization and review preparation. The tool ne
 - Real ChatGPT E2E is manual; CI fixtures are local and require no account.
 - LOCAL read-only MCP remains architecture-only until a later milestone.
 
-See [architecture](docs/architecture.md), [protocol](docs/protocol.md), [security](docs/security.md), and the [Browser Bridge](docs/browser-bridge.md).
+See [protocol](docs/protocol.md), [security](docs/security.md), and the [Browser Bridge](docs/browser-bridge.md).

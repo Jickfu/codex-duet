@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { GitRunner } from '../../src/github/git-runner.js';
-import { GitHubProvider } from '../../src/github/github-provider.js';
+import { GitHubCodeProvider } from '../../src/github/github-code-provider.js';
 import { githubReviewEnvelope } from '../../src/github/review-envelope.js';
 
 const run = promisify(execFile);
@@ -15,7 +15,11 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await run('git', args, { cwd, windowsHide: true })).stdout.trim();
 }
 
-async function fixture(): Promise<{ repo: string; bare: string; provider: GitHubProvider }> {
+async function fixture(): Promise<{
+  repo: string;
+  bare: string;
+  provider: GitHubCodeProvider;
+}> {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-duet-github-'));
   const repo = path.join(root, 'repo');
   const bare = path.join(root, 'remote.git');
@@ -36,10 +40,10 @@ async function fixture(): Promise<{ repo: string; bare: string; provider: GitHub
     'https://github.com/example/project.git',
   );
   await git(repo, 'push', '-u', 'origin', 'main');
-  return { repo, bare, provider: new GitHubProvider(new GitRunner(repo)) };
+  return { repo, bare, provider: new GitHubCodeProvider(new GitRunner(repo)) };
 }
 
-describe('GitHubProvider offline integration', { timeout: 15_000 }, () => {
+describe('GitHubCodeProvider offline integration', { timeout: 15_000 }, () => {
   it('reports a valid repository without mutation', async () => {
     const { provider } = await fixture();
     await expect(provider.doctor()).resolves.toMatchObject({
@@ -62,8 +66,8 @@ describe('GitHubProvider offline integration', { timeout: 15_000 }, () => {
     await writeFile(path.join(repo, 'feature.txt'), 'implemented\n');
     await git(repo, 'add', 'feature.txt');
     await git(repo, 'commit', '-m', 'implement demo');
-    const restarted = new GitHubProvider(new GitRunner(repo));
-    expect((await restarted.status('demo')).baseRef).toBe(context.baseRef);
+    const restarted = new GitHubCodeProvider(new GitRunner(repo));
+    await expect(restarted.status('demo')).resolves.toMatchObject({ baseRef: context.baseRef });
     const target = await restarted.getReviewTarget('demo', 'PASS');
     expect(target.reviewRef).toMatch(/^[0-9a-f]{40}$/);
     expect(target.reviewRef).not.toBe(target.baseRef);
@@ -128,12 +132,12 @@ describe('GitHubProvider offline integration', { timeout: 15_000 }, () => {
     const { repo, provider } = await fixture();
     await provider.prepareContext('broken');
     await writeFile(path.join(repo, '.chatbridge', 'tasks', 'broken.json'), '{"version":999}');
-    await expect(new GitHubProvider(new GitRunner(repo)).status('broken')).rejects.toThrow();
+    await expect(new GitHubCodeProvider(new GitRunner(repo)).status('broken')).rejects.toThrow();
   });
 
   it('rejects non-git, missing remote, and unsupported remote repositories', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'codex-duet-invalid-'));
-    await expect(new GitHubProvider(new GitRunner(root)).doctor()).rejects.toMatchObject({
+    await expect(new GitHubCodeProvider(new GitRunner(root)).doctor()).rejects.toMatchObject({
       code: 'NOT_GIT_REPOSITORY',
     });
     await git(root, 'init');
@@ -142,11 +146,11 @@ describe('GitHubProvider offline integration', { timeout: 15_000 }, () => {
     await writeFile(path.join(root, 'file'), 'x');
     await git(root, 'add', 'file');
     await git(root, 'commit', '-m', 'base');
-    await expect(new GitHubProvider(new GitRunner(root)).doctor()).rejects.toMatchObject({
+    await expect(new GitHubCodeProvider(new GitRunner(root)).doctor()).rejects.toMatchObject({
       code: 'GIT_REMOTE_MISSING',
     });
     await git(root, 'remote', 'add', 'origin', 'https://gitlab.com/example/project.git');
-    await expect(new GitHubProvider(new GitRunner(root)).doctor()).rejects.toMatchObject({
+    await expect(new GitHubCodeProvider(new GitRunner(root)).doctor()).rejects.toMatchObject({
       code: 'UNSUPPORTED_GIT_REMOTE',
     });
   });

@@ -1,6 +1,6 @@
-export type TestStatus = 'PASS' | 'FAIL' | 'NOT_RUN';
+import type { TestStatus } from '../core/domain.js';
 
-export type ContextRef = {
+export type GitHubContextRef = {
   mode: 'GITHUB';
   repository: string;
   remote: string;
@@ -9,10 +9,21 @@ export type ContextRef = {
   baseRef: string;
 };
 
-export type ReviewTarget = ContextRef & {
+export type LocalContextRef = {
+  mode: 'LOCAL';
+  taskId: string;
+};
+
+export type ContextRef = GitHubContextRef | LocalContextRef;
+
+export type GitHubReviewTarget = GitHubContextRef & {
   reviewRef: string;
   testStatus: TestStatus;
 };
+
+export type LocalReviewTarget = LocalContextRef;
+
+export type ReviewTarget = GitHubReviewTarget | LocalReviewTarget;
 
 export interface CodeProvider {
   prepareContext(taskId: string): Promise<ContextRef>;

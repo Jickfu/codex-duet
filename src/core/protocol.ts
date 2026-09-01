@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ProtocolError } from './errors.js';
-import { FullShaSchema, RepositorySchema, TestStatusSchema } from '../github/domain.js';
+import { TestStatusSchema } from './domain.js';
+import { FullShaSchema, RepositorySchema } from './github-fields.js';
 
 export const states = [
   'INIT',

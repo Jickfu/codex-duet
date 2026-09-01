@@ -1,47 +1,55 @@
 import { z } from 'zod';
+import { TaskIdSchema, TestStatusSchema } from './domain.js';
 import { StateSchema } from './protocol.js';
 import {
   FullShaSchema,
+  RemoteNameSchema,
   RepositorySchema,
-  TaskIdSchema,
-  TestStatusSchema,
-} from '../github/domain.js';
+  TaskBranchSchema,
+} from './github-fields.js';
 
-export const TaskCheckpointSchema = z
+const BaseTaskCheckpointShape = {
+  version: z.literal(1),
+  taskId: TaskIdSchema,
+  iteration: z.number().int().nonnegative(),
+  state: StateSchema,
+  conversationRef: z.string().min(1).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+};
+
+export const LocalTaskCheckpointSchema = z
   .object({
-    version: z.literal(1),
-    taskId: TaskIdSchema,
-    mode: z.enum(['LOCAL', 'GITHUB']),
-    iteration: z.number().int().nonnegative(),
-    state: StateSchema,
-    conversationRef: z.string().min(1).optional(),
-    repository: RepositorySchema.optional(),
-    remote: z
-      .string()
-      .regex(/^[A-Za-z0-9._-]+$/)
-      .optional(),
-    taskBranch: z
-      .string()
-      .regex(/^agent\/task-[A-Za-z0-9_-]{1,64}$/)
-      .optional(),
-    baseRef: FullShaSchema.optional(),
+    ...BaseTaskCheckpointShape,
+    mode: z.literal('LOCAL'),
+  })
+  .strict();
+
+export const GitHubTaskCheckpointSchema = z
+  .object({
+    ...BaseTaskCheckpointShape,
+    mode: z.literal('GITHUB'),
+    repository: RepositorySchema,
+    remote: RemoteNameSchema,
+    taskBranch: TaskBranchSchema,
+    baseRef: FullShaSchema,
     reviewRef: FullShaSchema.optional(),
     testStatus: TestStatusSchema.optional(),
-    createdAt: z.string().datetime(),
-    updatedAt: z.string().datetime(),
   })
+  .strict()
   .superRefine((value, context) => {
-    if (value.mode !== 'GITHUB') return;
-    for (const key of ['repository', 'remote', 'taskBranch', 'baseRef'] as const) {
+    if (value.state !== 'EXECUTED') return;
+    for (const key of ['reviewRef', 'testStatus'] as const) {
       if (!value[key])
         context.addIssue({ code: 'custom', path: [key], message: `${key} required` });
     }
-    if (value.state === 'EXECUTED') {
-      for (const key of ['reviewRef', 'testStatus'] as const) {
-        if (!value[key])
-          context.addIssue({ code: 'custom', path: [key], message: `${key} required` });
-      }
-    }
   });
 
+export const TaskCheckpointSchema = z.discriminatedUnion('mode', [
+  LocalTaskCheckpointSchema,
+  GitHubTaskCheckpointSchema,
+]);
+
+export type LocalTaskCheckpoint = z.infer<typeof LocalTaskCheckpointSchema>;
+export type GitHubTaskCheckpoint = z.infer<typeof GitHubTaskCheckpointSchema>;
 export type TaskCheckpoint = z.infer<typeof TaskCheckpointSchema>;

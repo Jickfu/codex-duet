@@ -1,14 +1,15 @@
 import path from 'node:path';
 import { ChatbridgeError } from '../core/errors.js';
 import { TaskCheckpointStore } from '../core/checkpoint.js';
-import type { TaskCheckpoint } from '../core/task.js';
+import type { GitHubTaskCheckpoint, TaskCheckpoint } from '../core/task.js';
+import type { TestStatus } from '../core/domain.js';
+import { TaskIdSchema } from '../core/domain.js';
 import type {
   CodeProvider,
-  ContextRef,
-  ReviewTarget,
-  TestStatus,
+  GitHubContextRef,
+  GitHubReviewTarget,
 } from '../providers/code-provider.js';
-import { FullShaSchema, parseGitHubRemote, taskBranchFor, TaskIdSchema } from './domain.js';
+import { FullShaSchema, parseGitHubRemote, taskBranchFor } from './domain.js';
 import { GitRunner } from './git-runner.js';
 
 export type GitHubDoctorReport = {
@@ -23,7 +24,7 @@ export type GitHubDoctorReport = {
   task?: TaskCheckpoint;
 };
 
-export class GitHubProvider implements CodeProvider {
+export class GitHubCodeProvider implements CodeProvider {
   private readonly store: TaskCheckpointStore;
 
   constructor(
@@ -60,7 +61,7 @@ export class GitHubProvider implements CodeProvider {
     };
   }
 
-  async prepareContext(taskIdInput: string): Promise<ContextRef> {
+  async prepareContext(taskIdInput: string): Promise<GitHubContextRef> {
     const taskId = this.taskId(taskIdInput);
     const taskBranch = taskBranchFor(taskId);
     await this.requireClean();
@@ -68,11 +69,12 @@ export class GitHubProvider implements CodeProvider {
     const repository = this.repositoryFrom(await this.remoteUrl());
     const existing = await this.store.read(taskId);
     if (existing) {
-      this.validateIdentity(existing, repository, taskBranch);
+      const githubCheckpoint = this.githubCheckpoint(existing);
+      this.validateIdentity(githubCheckpoint, repository, taskBranch);
       const branches = await this.git.run(['branch', '--list', taskBranch]);
       if (!branches.stdout)
         throw new ChatbridgeError('Task branch is missing', 'TASK_BRANCH_MISSING');
-      return this.context(existing);
+      return this.context(githubCheckpoint);
     }
 
     const branches = await this.git.run(['branch', '--list', taskBranch]);
@@ -107,12 +109,10 @@ export class GitHubProvider implements CodeProvider {
     return checkpoint;
   }
 
-  async getReviewTarget(taskIdInput: string, testStatus: TestStatus): Promise<ReviewTarget> {
+  async getReviewTarget(taskIdInput: string, testStatus: TestStatus): Promise<GitHubReviewTarget> {
     const taskId = this.taskId(taskIdInput);
     await this.requireClean();
-    const checkpoint = await this.status(taskId);
-    if (checkpoint.mode !== 'GITHUB')
-      throw new ChatbridgeError('Task is not in GitHub mode', 'TASK_MODE_MISMATCH');
+    const checkpoint = this.githubCheckpoint(await this.status(taskId));
     const repository = this.repositoryFrom(await this.remoteUrl());
     this.validateIdentity(checkpoint, repository, taskBranchFor(taskId));
     if ((await this.currentBranch()) !== checkpoint.taskBranch)
@@ -122,7 +122,7 @@ export class GitHubProvider implements CodeProvider {
     if (reviewRef === checkpoint.baseRef)
       throw new ChatbridgeError('Task has no commit after BASE_REF', 'TASK_COMMIT_MISSING');
     try {
-      await this.git.run(['merge-base', '--is-ancestor', checkpoint.baseRef!, reviewRef]);
+      await this.git.run(['merge-base', '--is-ancestor', checkpoint.baseRef, reviewRef]);
     } catch {
       throw new ChatbridgeError(
         'BASE_REF is not an ancestor of REVIEW_REF',
@@ -133,8 +133,8 @@ export class GitHubProvider implements CodeProvider {
     try {
       await this.git.run([
         'push',
-        checkpoint.remote!,
-        `${checkpoint.taskBranch!}:${checkpoint.taskBranch!}`,
+        checkpoint.remote,
+        `${checkpoint.taskBranch}:${checkpoint.taskBranch}`,
       ]);
     } catch (error) {
       if (error instanceof Error && /non-fast-forward|rejected/i.test(error.message))
@@ -144,8 +144,8 @@ export class GitHubProvider implements CodeProvider {
     const remoteResult = await this.git.run([
       'ls-remote',
       '--heads',
-      checkpoint.remote!,
-      `refs/heads/${checkpoint.taskBranch!}`,
+      checkpoint.remote,
+      `refs/heads/${checkpoint.taskBranch}`,
     ]);
     const remoteSha = remoteResult.stdout.split(/\s+/)[0];
     if (!remoteSha || !FullShaSchema.safeParse(remoteSha).success || remoteSha !== reviewRef)
@@ -213,7 +213,11 @@ export class GitHubProvider implements CodeProvider {
     return branch;
   }
 
-  private validateIdentity(checkpoint: TaskCheckpoint, repository: string, branch: string): void {
+  private validateIdentity(
+    checkpoint: GitHubTaskCheckpoint,
+    repository: string,
+    branch: string,
+  ): void {
     if (
       checkpoint.repository !== repository ||
       checkpoint.remote !== this.remote ||
@@ -225,14 +229,14 @@ export class GitHubProvider implements CodeProvider {
       );
   }
 
-  private context(checkpoint: TaskCheckpoint): ContextRef {
+  private context(checkpoint: GitHubTaskCheckpoint): GitHubContextRef {
     return {
       mode: 'GITHUB',
-      repository: checkpoint.repository!,
-      remote: checkpoint.remote!,
+      repository: checkpoint.repository,
+      remote: checkpoint.remote,
       taskId: checkpoint.taskId,
-      taskBranch: checkpoint.taskBranch!,
-      baseRef: checkpoint.baseRef!,
+      taskBranch: checkpoint.taskBranch,
+      baseRef: checkpoint.baseRef,
     };
   }
 
@@ -240,6 +244,12 @@ export class GitHubProvider implements CodeProvider {
     const parsed = TaskIdSchema.safeParse(input);
     if (!parsed.success) throw new ChatbridgeError('Invalid task ID', 'INVALID_TASK_ID');
     return parsed.data;
+  }
+
+  private githubCheckpoint(checkpoint: TaskCheckpoint): GitHubTaskCheckpoint {
+    if (checkpoint.mode !== 'GITHUB')
+      throw new ChatbridgeError('Task is not in GitHub mode', 'TASK_MODE_MISMATCH');
+    return checkpoint;
   }
 }
 

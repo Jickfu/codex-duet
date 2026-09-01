@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseGitHubRemote, taskBranchFor, TaskIdSchema } from '../../src/github/domain.js';
+import { TaskIdSchema } from '../../src/core/domain.js';
+import { parseGitHubRemote, taskBranchFor } from '../../src/github/domain.js';
 
 describe('GitHub domain validation', () => {
   it.each([

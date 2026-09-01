@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SessionStore, TaskCheckpointStore } from '../../src/core/checkpoint.js';
+import { TaskCheckpointSchema } from '../../src/core/task.js';
 
 describe('task checkpoint', () => {
   it('atomically persists and restores required task identity', async () => {
@@ -34,6 +35,53 @@ describe('task checkpoint', () => {
   it('rejects path-like task IDs', async () => {
     const store = new TaskCheckpointStore(await mkdtemp(path.join(tmpdir(), 'codex-duet-')));
     await expect(store.read('../escape')).rejects.toThrow(/Invalid task ID/);
+  });
+
+  it('accepts a minimal LOCAL checkpoint without GitHub fields', () => {
+    expect(
+      TaskCheckpointSchema.parse({
+        version: 1,
+        taskId: 'LOCAL_1',
+        mode: 'LOCAL',
+        iteration: 0,
+        state: 'INIT',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      }),
+    ).toMatchObject({ mode: 'LOCAL', taskId: 'LOCAL_1' });
+  });
+
+  it('requires review fields for an EXECUTED GitHub checkpoint', () => {
+    expect(() =>
+      TaskCheckpointSchema.parse({
+        version: 1,
+        taskId: 'github',
+        mode: 'GITHUB',
+        iteration: 1,
+        state: 'EXECUTED',
+        repository: 'owner/repo',
+        remote: 'origin',
+        taskBranch: 'agent/task-github',
+        baseRef: 'a'.repeat(40),
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(1).toISOString(),
+      }),
+    ).toThrow(/required/);
+  });
+
+  it('rejects mode-specific fields on LOCAL checkpoints', () => {
+    expect(() =>
+      TaskCheckpointSchema.parse({
+        version: 1,
+        taskId: 'local',
+        mode: 'LOCAL',
+        iteration: 0,
+        state: 'INIT',
+        repository: 'owner/repo',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      }),
+    ).toThrow();
   });
 });
 

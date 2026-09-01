@@ -7,7 +7,7 @@ M2 adds the deterministic Git/GitHub data plane. It does not add the M3 orchestr
 - GitHub is the code/data plane: commits, files, diffs, documentation, and tests are reviewed there.
 - Browser Bridge is only the control plane. It carries a compact C2C envelope and never carries source, diffs, repository archives, DOM state, browser storage, or credentials.
 - M1 Browser Bridge remains frozen. GitHub Mode depends on the existing `BrowserAutomationSession` boundary and does not bypass or redesign it.
-- `CodeProvider` is the shared data-plane boundary. M2 supplies `GitHubProvider`; a Local provider is deferred to M4.
+- `CodeProvider` is the mode-aware data-plane boundary, using LOCAL/GITHUB discriminated context and review-target unions. M2 supplies `GitHubCodeProvider`; a Local provider implementation is deferred to M4.
 
 ## Task and ref semantics
 
@@ -35,6 +35,12 @@ chatbridge github prepare-review --task <id> --tests PASS|FAIL|NOT_RUN
 `doctor` is read-only and reports Git/repository detection, the configured remote URL, repository identity, current branch, full HEAD, clean/dirty state, and optional task metadata. It does not inspect credential helpers, tokens, environment variables, browser state, or private configuration.
 
 `FAIL` and `NOT_RUN` are valid review states. Tests are an explicit executor-supplied fact; M2 does not infer or run a project's test command.
+
+## Local Git and GitHub Platform
+
+`GitHubCodeProvider` means the GitHub-mode code-context provider; it is not a GitHub Platform API adapter. Its correctness-critical repository and transport operations continue to use the deterministic `GitRunner`/system Git CLI, including status, local HEAD, branch creation, ancestry, push, and remote SHA verification.
+
+PRs, checks, workflows, comments, and platform metadata form a separate future `GitHubPlatform` capability boundary. A structured Codex GitHub plugin/skill, `gh`, or REST adapter may support that boundary later. M2 binds none of them. Natural-language agent output must never be parsed as a correctness-critical infrastructure primitive.
 
 ## Offline deterministic acceptance
 

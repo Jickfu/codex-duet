@@ -1,7 +1,7 @@
-import type { ReviewTarget } from '../providers/code-provider.js';
+import type { GitHubReviewTarget } from '../providers/code-provider.js';
 import { serializeEnvelope } from '../core/protocol.js';
 
-export function githubReviewEnvelope(target: ReviewTarget, iteration = 1): string {
+export function githubReviewEnvelope(target: GitHubReviewTarget, iteration = 1): string {
   return serializeEnvelope({
     version: 1,
     taskId: target.taskId,

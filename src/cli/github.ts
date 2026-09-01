@@ -1,13 +1,13 @@
 import path from 'node:path';
 import process from 'node:process';
 import { GitRunner } from '../github/git-runner.js';
-import { GitHubProvider } from '../github/github-provider.js';
+import { GitHubCodeProvider } from '../github/github-code-provider.js';
 import { githubReviewEnvelope } from '../github/review-envelope.js';
-import type { TestStatus } from '../providers/code-provider.js';
+import type { TestStatus } from '../core/domain.js';
 
-function provider(): GitHubProvider {
+function provider(): GitHubCodeProvider {
   const cwd = process.cwd();
-  return new GitHubProvider(new GitRunner(cwd), 'origin', path.join(cwd, '.chatbridge'));
+  return new GitHubCodeProvider(new GitRunner(cwd), 'origin', path.join(cwd, '.chatbridge'));
 }
 
 export async function githubDoctor(task?: string): Promise<void> {

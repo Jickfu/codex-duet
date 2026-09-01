@@ -1,11 +1,6 @@
-import { z } from 'zod';
-
-export const FullShaSchema = z.string().regex(/^[0-9a-f]{40}$/, 'Expected a full 40-character SHA');
-export const TaskIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'Invalid task ID');
-export const RepositorySchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Expected GitHub owner/repository');
-export const TestStatusSchema = z.enum(['PASS', 'FAIL', 'NOT_RUN']);
+import { TaskIdSchema } from '../core/domain.js';
+export { FullShaSchema, RepositorySchema } from '../core/github-fields.js';
+import { RepositorySchema } from '../core/github-fields.js';
 
 export function taskBranchFor(taskId: string): string {
   return `agent/task-${TaskIdSchema.parse(taskId)}`;

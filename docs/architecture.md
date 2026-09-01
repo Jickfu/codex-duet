@@ -10,14 +10,35 @@ The **Control Plane** carries small machine-readable lifecycle messages. The **D
 
 In **LOCAL mode**, Codex sends control messages through Playwright. A future remote MCP endpoint backed by a local read-only bridge provides the data plane and returns `submit_response` events to Codex. Codex does not poll the page for replies. In **GITHUB mode**, the ChatGPT GitHub integration is the data plane and Playwright carries control messages in both directions. Review identity uses immutable base and review commit SHAs, not only branch names.
 
-M0/M1 implements only the shared protocol/state machine and the deterministic browser transport. Mode providers and orchestration remain future milestones.
+M0/M1 implements the shared protocol/state machine and deterministic browser transport. M2 adds the GitHub code provider; orchestration remains a future milestone.
 
 ## Components
 
-- `core`: protocol, state transitions, errors, and atomic bridge checkpoint.
+- `core`: shared task/test domain, mode-aware protocol and checkpoints, state transitions, and errors. Core never imports the GitHub implementation layer.
 - `browser`: connection abstraction, managed Chromium lifecycle, centralized ChatGPT adapter, response waiter.
 - `cli`: small commands that return only status or the requested final payload.
-- Future `providers`: LOCAL read-only MCP and GITHUB reference/data-plane implementations.
+- `providers`: mode-aware `CodeProvider` contracts expressed as LOCAL/GITHUB discriminated unions.
+- `github`: `GitHubCodeProvider`, GitHub remote parsing, immutable review-envelope construction, and deterministic `GitRunner` integration.
+
+## Code provider and capability layers
+
+`CodeProvider` prepares a mode-specific code context and review target. `GitHubCodeProvider` implements this contract for M2; a minimal LOCAL type reserves the discriminator without implementing Local MCP or guessing its future workspace fields.
+
+The provider layers are:
+
+```text
+core shared domain
+        ↑
+CodeProvider contract
+        ↑
+GitHubCodeProvider
+        ↓
+GitRunner / git CLI
+```
+
+`GitRunner` and the system Git CLI remain authoritative for correctness-critical local repository state and Git transport: status, HEAD, branches, ancestry, push, and remote-SHA verification.
+
+GitHub Platform capabilities are a separate future boundary for PRs, checks, workflows, comments, and platform metadata. Possible future backends include a structured Codex GitHub plugin, `gh`, or GitHub REST. None is selected or implemented in M2. A natural-language LLM interaction whose output must be parsed is not a deterministic infrastructure primitive and cannot replace Local Git.
 
 ## Token efficiency
 

@@ -4,6 +4,7 @@ import type { TestStatus } from '../core/domain.js';
 import { TaskIdSchema } from '../core/domain.js';
 import { ChatbridgeError } from '../core/errors.js';
 import {
+  EnvelopeSchema,
   parseEnvelope,
   serializeEnvelope,
   type Envelope,
@@ -59,7 +60,7 @@ export class DuetOrchestrator {
     const run = await this.requireRun(taskIdInput);
     let envelope: Envelope;
     try {
-      envelope = parseEnvelope(await readFile(messageFile, 'utf8'));
+      envelope = parseIngestEnvelope(await readFile(messageFile, 'utf8'));
     } catch (error) {
       throw new ChatbridgeError(
         error instanceof Error ? error.message : 'Invalid C2C response',
@@ -181,6 +182,21 @@ export class DuetOrchestrator {
       );
     }
   }
+}
+
+function parseIngestEnvelope(text: string): Envelope {
+  try {
+    return parseEnvelope(text);
+  } catch {
+    // Frozen M1 `wait --parse` emits the already validated Envelope as JSON.
+  }
+  try {
+    const parsed = EnvelopeSchema.strict().safeParse(JSON.parse(text));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Keep malformed input details out of CLI errors.
+  }
+  throw new Error('Malformed C2C envelope');
 }
 
 function planningEnvelope(run: DuetRunCheckpointV1, request: string): string {

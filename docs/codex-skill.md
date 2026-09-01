@@ -4,6 +4,10 @@ Status: **M3.0 implementation complete**
 
 Desktop E2E: **MANUAL REQUIRED**
 
+## Dogfood regression note
+
+**M3.0 Desktop E2E finding #1:** the first real Desktop dogfood attempt exposed a contract mismatch between M1 `wait --parse` Envelope JSON and M3's raw-C2C-only ingest boundary. M3 now accepts both the canonical parsed JSON path and raw C2C compatibility path through the same protocol schema and lifecycle validation. The failed attempt is not an E2E pass; acceptance must restart with a fresh task after this fix.
+
 ## Location and discovery
 
 The canonical repository Skill is `.agents/skills/codex-duet/SKILL.md`. Open this repository as the Codex Desktop workspace so repo-local skills can be discovered, then explicitly invoke it. If the installed Codex Desktop release does not discover repo-local skills, use that release's supported Skills import/install UI to import the `codex-duet` folder; do not assume or hard-code a user profile directory.
@@ -21,7 +25,7 @@ Ordinary code questions do not trigger this side-effecting workflow. The Skill c
 
 ## What happens
 
-The Skill asks ChatGPT Web for a PLAN through the Frozen Browser Bridge before code changes. The current Codex Desktop agent performs the implementation as the only Executor. `chatbridge duet prepare-review` composes the Frozen GitHub provider to produce and push an immutable `BASE_REF..REVIEW_REF`; ChatGPT then reviews that exact range.
+The Skill asks ChatGPT Web for a PLAN through the Frozen Browser Bridge before code changes. Its canonical receive path is `chatbridge wait --parse`, save the complete validated Envelope JSON, then `chatbridge duet ingest`; raw C2C remains accepted for compatibility and diagnostics. The current Codex Desktop agent performs the implementation as the only Executor. `chatbridge duet prepare-review` composes the Frozen GitHub provider to produce and push an immutable `BASE_REF..REVIEW_REF`; ChatGPT then reviews that exact range.
 
 No Codex CLI, Codex SDK, secondary Codex agent, daemon, or automated Codex Desktop UI control is required.
 

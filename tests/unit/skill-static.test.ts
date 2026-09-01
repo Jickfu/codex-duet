@@ -19,6 +19,9 @@ describe('codex-duet Skill', () => {
     expect(text).toContain('Do not push');
     expect(text).toContain('Never inspect ChatGPT DOM/selectors');
     expect(text).toContain('Never bypass');
+    expect(text).toContain('chatbridge wait --parse');
+    expect(text).toContain('validated Envelope JSON');
+    expect(text).toContain('Raw C2C');
     expect(text).not.toContain('@openai/codex-sdk');
   });
 });

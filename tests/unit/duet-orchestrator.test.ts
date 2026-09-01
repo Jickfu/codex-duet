@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TestStatus } from '../../src/core/domain.js';
-import { serializeEnvelope } from '../../src/core/protocol.js';
+import { serializeEnvelope, type Envelope } from '../../src/core/protocol.js';
 import { DuetOrchestrator } from '../../src/duet/orchestrator.js';
 import { DuetRunStore } from '../../src/duet/run-store.js';
 import type { GitHubContextRef, GitHubReviewTarget } from '../../src/providers/code-provider.js';
@@ -51,18 +51,20 @@ async function respond(
   state: 'PLAN' | 'BLOCKED' | 'FAILED' | 'DONE',
   iteration = 1,
   overrides: Record<string, unknown> = {},
+  format: 'raw' | 'json' = 'raw',
 ) {
+  const envelope = {
+    version: 1,
+    taskId: 'demo',
+    iteration,
+    state,
+    mode: 'GITHUB',
+    content: `${state} content`,
+    ...overrides,
+  } as Envelope;
   await writeFile(
     responseFile,
-    serializeEnvelope({
-      version: 1,
-      taskId: 'demo',
-      iteration,
-      state,
-      mode: 'GITHUB',
-      content: `${state} content`,
-      ...overrides,
-    }),
+    format === 'raw' ? serializeEnvelope(envelope) : JSON.stringify(envelope, null, 2),
     'utf8',
   );
 }
@@ -96,6 +98,22 @@ describe('DuetOrchestrator', () => {
     expect(executed.state).toBe('EXECUTED');
     expect((await duet.markReviewing('demo')).state).toBe('REVIEWING');
   });
+  it('ingests raw C2C and parsed Envelope JSON with identical PLAN results', async () => {
+    await init();
+    await respond('PLAN');
+    const raw = await duet.ingest('demo', responseFile);
+
+    const jsonStore = new DuetRunStore(path.join(temporary, '.chatbridge-json'));
+    const jsonDuet = new DuetOrchestrator(provider as never, jsonStore);
+    await jsonDuet.init('demo', requestFile, outputFile);
+    await respond('PLAN', 1, {}, 'json');
+    const json = await jsonDuet.ingest('demo', responseFile);
+
+    expect(json).toMatchObject({ state: raw.state, iteration: raw.iteration, plan: raw.plan });
+    expect(await readFile(jsonStore.artifactPath('demo', 'plan.md'), 'utf8')).toBe(
+      await readFile(store.artifactPath('demo', 'plan.md'), 'utf8'),
+    );
+  });
   it.each(['PLANNING', 'REVIEWING'] as const)('accepts BLOCKED from %s', async (phase) => {
     if (phase === 'PLANNING') await init();
     else await reachReviewing();
@@ -109,6 +127,16 @@ describe('DuetOrchestrator', () => {
     await reachReviewing();
     await respond('DONE');
     expect((await duet.ingest('demo', responseFile)).state).toBe('DONE');
+  });
+  it.each([
+    ['DONE', 1],
+    ['BLOCKED', 1],
+    ['FAILED', 1],
+    ['PLAN', 2],
+  ] as const)('accepts reviewer %s as parsed Envelope JSON', async (state, iteration) => {
+    await reachReviewing();
+    await respond(state, iteration, {}, 'json');
+    expect(await duet.ingest('demo', responseFile)).toMatchObject({ state, iteration });
   });
   it('persists reviewer PLAN as the next iteration', async () => {
     await reachReviewing();
@@ -139,6 +167,48 @@ describe('DuetOrchestrator', () => {
       code: 'C2C_RESPONSE_INVALID',
     });
   });
+  it.each([
+    '{}',
+    '{"state":"PLAN"}',
+    '{"version":1,"taskId":7,"iteration":"1","state":"PLAN","content":false}',
+    JSON.stringify({
+      version: 1,
+      taskId: 'demo',
+      iteration: 1,
+      state: 'PLAN',
+      mode: 'GITHUB',
+      reviewRef: 'not-a-full-sha',
+      content: 'plan',
+    }),
+    JSON.stringify({
+      version: 1,
+      taskId: 'demo',
+      iteration: 1,
+      state: 'PLAN',
+      mode: 'GITHUB',
+      content: 'plan',
+      unexpected: true,
+    }),
+  ])('rejects invalid parsed Envelope JSON', async (message) => {
+    await init();
+    await writeFile(responseFile, message, 'utf8');
+    await expect(duet.ingest('demo', responseFile)).rejects.toMatchObject({
+      code: 'C2C_RESPONSE_INVALID',
+    });
+  });
+  it.each([
+    ['other', 1, 'GITHUB', 'PLAN', 'TASK_MISMATCH'],
+    ['demo', 9, 'GITHUB', 'PLAN', 'ITERATION_MISMATCH'],
+    ['demo', 1, 'LOCAL', 'PLAN', 'MODE_MISMATCH'],
+    ['demo', 1, 'GITHUB', 'DONE', 'RUN_STATE_INVALID'],
+  ] as const)(
+    'keeps lifecycle validation authoritative for parsed JSON (%s)',
+    async (taskId, iteration, mode, state, code) => {
+      await init();
+      await respond(state, iteration, { taskId, mode }, 'json');
+      await expect(duet.ingest('demo', responseFile)).rejects.toMatchObject({ code });
+    },
+  );
   it('rejects illegal lifecycle jumps', async () => {
     await init();
     await expect(duet.beginExecution('demo')).rejects.toMatchObject({ code: 'RUN_STATE_INVALID' });

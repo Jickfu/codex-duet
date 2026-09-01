@@ -10,10 +10,14 @@ function harness(success: (args: readonly string[]) => boolean) {
   const runner = {
     run: vi.fn(async (args: readonly string[]) => {
       if (args.includes('run-code') && attached)
-        return {
-          stdout: `CHATBRIDGE_RESULT_${Buffer.from(JSON.stringify({ ok: true })).toString('base64')}`,
-          stderr: '',
-        };
+        return (() => {
+          const nonce = String(args[2]).match(/"nonce":"([^"]+)"/)?.[1];
+          const payload = Buffer.from(
+            encodeURIComponent(JSON.stringify({ ok: true })),
+            'ascii',
+          ).toString('hex');
+          return { stdout: `CHATBRIDGE_RESULT_${nonce}_${payload}`, stderr: '' };
+        })();
       if (args.includes('detach')) {
         attached = false;
         return { stdout: 'detached', stderr: '' };

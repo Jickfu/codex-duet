@@ -46,10 +46,10 @@ export async function doctor(options: { endpoint?: string } = {}) {
     `Extension Edge: ${edgeExtension ? 'available (session not validated)' : 'unavailable'}`,
   );
   console.log(
-    `Channel CDP Chrome: ${chromeChannel ? 'authorized (session not validated)' : 'not authorized'}`,
+    `Channel CDP Chrome: ${chromeChannel ? 'available (session not validated)' : 'not validated / authorization may be required'}`,
   );
   console.log(
-    `Channel CDP Edge: ${edgeChannel ? 'authorized (session not validated)' : 'not authorized'}`,
+    `Channel CDP Edge: ${edgeChannel ? 'available (session not validated)' : 'not validated / authorization may be required'}`,
   );
   console.log(
     `Raw CDP endpoint: ${options.endpoint ? `${options.endpoint} ${raw ? 'reachable' : 'unreachable'}` : 'not specified'}`,

@@ -8,6 +8,7 @@ Status: implementation complete; native existing-session acceptance **MANUAL REQ
 - M1.1 introduced existing-browser support and explicit browser lifecycle ownership.
 - M1.2 introduced the transport-independent `BrowserAutomationSession`, official Playwright Extension/channel-CDP transports, raw CDP, and ordered fallback.
 - M1.2.1 hardens navigation invalidation, CLI error taxonomy, attach-phase fallback semantics, executable discovery, diagnostics, and compatibility policy.
+- M1.2.2 removes unsupported host-global assumptions from generated CLI sandbox code, adds canonical origin-boundary matching and nonce-bound structured bridge errors, and softens interactive CDP doctor diagnostics.
 
 ## Frozen contract candidate
 
@@ -21,4 +22,6 @@ After native acceptance, Browser Bridge architecture is frozen except for securi
 
 Run [the manual existing-browser E2E](../manual-existing-browser-e2e.md) in a normal signed-in Chrome or Edge session. At least one of Extension or channel CDP must demonstrate send/wait/detach without a new profile, browser download, login, snapshot leakage, or browser/tab closure. Record the environment and result here before changing the status to Frozen.
 
-Current result (2026-09-01): MANUAL REQUIRED. This execution environment reported Extension unavailable and channel CDP not authorized; no native-session result is claimed.
+Baseline finding (2026-09-01): Channel CDP successfully attached to the normal Chrome profile and enumerated its existing tabs, but `run-code` exposed neither `URL` nor `globalThis.URL`. This caused the pre-M1.2.2 matcher to reject every page.
+
+Post-fix native result (2026-09-01): attach returned `existing-channel-cdp` and login-state validation succeeded against the existing Chrome session, confirming the sandbox origin fix. The subsequent `send` returned `PLAYWRIGHT_CLI_TIMEOUT`, so no final `wait` payload could be accepted. Detach completed without requesting browser shutdown. The native gate remains MANUAL REQUIRED and M1 is not Frozen; the send timeout requires a separately scoped compatibility diagnosis rather than an unverified DOM-click workaround.

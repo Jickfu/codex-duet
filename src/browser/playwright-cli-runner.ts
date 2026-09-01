@@ -46,9 +46,7 @@ export class PlaywrightCliRunner implements PlaywrightCliRunnerLike {
 
 export function classifyCliFailure(error: any): ChatbridgeError {
   const diagnostic = `${String(error?.stdout ?? '')}\n${String(error?.stderr ?? '')}`;
-  if (diagnostic.includes('ORIGIN_DENIED'))
-    return new ChatbridgeError('Page navigated outside the allowlisted origin', 'ORIGIN_DENIED');
-  if (error?.killed || error?.code === 'ETIMEDOUT' || diagnostic.includes('BRIDGE_TIMEOUT'))
+  if (error?.killed || error?.code === 'ETIMEDOUT')
     return new ChatbridgeError('Playwright CLI operation timed out', 'PLAYWRIGHT_CLI_TIMEOUT');
   if (
     /session.{0,40}(not found|does not exist|closed)|no (browser )?session|browser session.{0,20}(lost|closed)/i.test(

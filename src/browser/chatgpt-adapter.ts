@@ -213,6 +213,8 @@ class OperationGuard {
       this.assertValid();
       return value;
     } catch (error) {
+      if (error instanceof Error && /execution context was destroyed/i.test(error.message))
+        await this.delay(25);
       this.assertValid();
       throw error;
     }

@@ -55,7 +55,7 @@ export function buildCliOperation(
       streaming: CHATGPT_STREAMING_SELECTOR,
     },
   });
-  // run-code is a restricted sandbox. Keep this source self-contained and host-global free.
+  // run-code follows the documented restricted-sandbox capability contract below.
   return `async page => {
     const c=${config};
     const fail=code=>{throw new Error(code)};
@@ -69,7 +69,7 @@ export function buildCliOperation(
     const exact=url=>page.url()===url?page:page.context().pages().find(p=>p.url()===url);
     const metadata=async(target,execute=action=>action())=>{const result=[];for(const item of await execute(()=>target.$$(c.selectors.message))){const id=await execute(()=>item.getAttribute('data-message-id'));const role=await execute(()=>item.getAttribute('data-message-author-role'));if(typeof role==='string')result.push(validId(id)?{id,role}:{role})}return result};
     const latest=(items,role)=>{for(let i=items.length-1;i>=0;i--)if(items[i].role===role&&items[i].id)return items[i].id};
-    const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+    const delay=ms=>page.waitForTimeout(ms);
     const poll=async(predicate,timeout,timeoutCode='BRIDGE_TIMEOUT')=>{const deadline=Date.now()+timeout;while(Date.now()<deadline){const value=await predicate();if(value!==undefined)return value;await delay(50)}fail(timeoutCode)};
     let target;
     let invalid=false;

@@ -24,7 +24,11 @@ Screenshots are not normal transport. Real-site tests are manual and optional. O
 
 M1.2 pins the official `@playwright/cli` package. CLI stdout and snapshot descriptions are captured internally; only structured bridge results escape. Official `detach` leaves external browsers and tabs running.
 
-Generated CLI operations run in a restricted sandbox and do not assume `URL`, Node globals, or complete browser globals. Allowed origins are canonicalized in Node, then matched in the sandbox using exact origin boundaries. Results and allowlisted bridge errors use a per-operation random nonce; echoed source text cannot impersonate an error signal.
+## CLI sandbox capability contract
+
+Playwright CLI `run-code` is neither a web-page JavaScript environment nor a complete Node.js environment. Generated operations may depend only on the injected `page` and Page APIs reachable through its context, plus sandbox primitives verified by native Channel CDP testing: `Date`, `Promise`, `JSON`, `Math`, `encodeURIComponent`, `decodeURIComponent`, and ordinary ECMAScript built-ins such as Array, Object, String, and RegExp. Polling and navigation grace periods sleep through `page.waitForTimeout()`.
+
+Generated operations must not depend on `URL`, `setTimeout`, `clearTimeout`, `TextEncoder`, `Buffer`, `process`, `performance`, `window`, `document`, `location`, Node module globals, or browser-page globals. This list changes only after an explicit Playwright CLI compatibility test updates the contract. Allowed origins are canonicalized in Node, then matched in the sandbox using exact origin boundaries. Results and allowlisted bridge errors use a per-operation random nonce; echoed source text cannot impersonate an error signal.
 
 ## Dependency compatibility
 

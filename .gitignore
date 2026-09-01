@@ -5,6 +5,8 @@ dist/
 e2e.txt
 e2e-probe.js
 e2e-message-id-probe.js
+e2e-*.js
+e2e-*.mjs
 playwright-report/
 test-results/
 *.log

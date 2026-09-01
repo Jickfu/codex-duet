@@ -19,6 +19,23 @@ const decodedOutput = (output: string) => {
     ? JSON.parse(decodeURIComponent(Buffer.from(payload, 'hex').toString('ascii')))
     : {};
 };
+const executeRestricted = (code: string, page: unknown, globals: Record<string, unknown> = {}) => {
+  const names = [
+    'URL',
+    'setTimeout',
+    'clearTimeout',
+    'TextEncoder',
+    'Buffer',
+    'process',
+    'performance',
+    'window',
+    'document',
+  ];
+  const operation = new Function(...names, `return (${code})`)(
+    ...names.map((name) => globals[name]),
+  );
+  return operation(page);
+};
 describe('Playwright CLI transport', () => {
   it('returns only structured bridge data, never CLI snapshot output', async () => {
     const marker = {
@@ -195,6 +212,37 @@ describe('Playwright CLI transport', () => {
     expect(code).not.toContain('globalThis.URL');
     expect(code).not.toMatch(/cookies\(|localStorage|sessionStorage|storageState|screenshot/);
   });
+  it('keeps every production operation within the sandbox capability contract', () => {
+    const operations = [
+      { kind: 'ensure' as const },
+      { kind: 'login' as const },
+      { kind: 'prepare' as const },
+      {
+        kind: 'commit' as const,
+        message: 'safe message',
+        conversationUrl: 'https://chatgpt.com/c/test',
+        previousUserMessageId: 'user-old',
+      },
+      {
+        kind: 'recover' as const,
+        conversationUrl: 'https://chatgpt.com/c/test',
+        previousUserMessageId: 'user-old',
+      },
+      {
+        kind: 'wait' as const,
+        conversationUrl: 'https://chatgpt.com/c/test',
+        outgoingUserMessageId: 'user-new',
+        timeoutMs: 1000,
+      },
+    ];
+    const forbidden =
+      /\bnew\s+URL\s*\(|\bsetTimeout\s*\(|\bclearTimeout\s*\(|\bTextEncoder\b|\bBuffer\b|\bprocess\s*\.|\bperformance\s*\.|\bwindow\s*\.|\bdocument\s*\./;
+    for (const operation of operations) {
+      const code = buildCliOperation(operation, 'https://chatgpt.com/', ['https://chatgpt.com']);
+      expect(code).not.toMatch(forbidden);
+      expect(code).toContain('page.waitForTimeout');
+    }
+  });
   it.each([
     ['https://chatgpt.com/', true],
     ['https://chatgpt.com/c/abc', true],
@@ -266,6 +314,90 @@ describe('Playwright CLI transport', () => {
     )();
     expect(await operation(foreign)).toContain('CHATBRIDGE_ERROR_ambiguous_');
   });
+  it('polls wait through page.waitForTimeout with forbidden globals unavailable', async () => {
+    const waits: number[] = [];
+    let streamingReads = 0;
+    const user = {
+      getAttribute: async (name: string) => (name === 'data-message-id' ? 'user-anchor' : 'user'),
+    };
+    const assistant = {
+      getAttribute: async (name: string) => {
+        if (name === 'data-message-id') return 'assistant-target';
+        if (name === 'data-message-author-role') return 'assistant';
+        if (name === 'data-message-streaming') return streamingReads++ === 0 ? 'true' : null;
+        return null;
+      },
+      $: async () => null,
+      innerText: async () => 'final response',
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/wait',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [user, assistant],
+      $: async () => null,
+      waitForTimeout: async (ms: number) => waits.push(ms),
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'wait',
+          conversationUrl: target.url(),
+          outgoingUserMessageId: 'user-anchor',
+          timeoutMs: 1000,
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'restricted-wait',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toEqual({ value: 'final response' });
+    expect(waits).toEqual([50, 50]);
+  });
+  it('polls outgoing identity through page.waitForTimeout in the restricted sandbox', async () => {
+    const waits: number[] = [];
+    let metadataReads = 0;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = { isVisible: async () => true, click: async () => undefined };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/commit',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [message(metadataReads++ < 2 ? 'user-old' : 'user-new')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async (ms: number) => waits.push(ms),
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'restricted-commit',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toMatchObject({
+      value: { outgoingUserMessageId: 'user-new' },
+    });
+    expect(waits).toEqual([50]);
+  });
   it('fails closed when a recovery candidate navigates foreign during metadata query', async () => {
     let currentUrl = 'https://chatgpt.com/c/recover';
     let listener: ((frame: object) => void) | undefined;
@@ -277,6 +409,7 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => frame,
       on: (_event: string, value: (frame: object) => void) => (listener = value),
       off: vi.fn(),
+      waitForTimeout: vi.fn(async () => undefined),
       $$: vi.fn(async () => {
         queries++;
         currentUrl = 'https://evil.example/foreign';
@@ -292,8 +425,8 @@ describe('Playwright CLI transport', () => {
       }),
     };
     candidate.context = () => ({ pages: () => [candidate] });
-    const operation = new Function(
-      `return (${buildCliOperation(
+    const output = await executeRestricted(
+      buildCliOperation(
         {
           kind: 'recover',
           conversationUrl: 'https://chatgpt.com/c/recover',
@@ -302,12 +435,13 @@ describe('Playwright CLI transport', () => {
         'https://chatgpt.com/',
         ['https://chatgpt.com'],
         'race',
-      )})`,
-    )();
-    const output = await operation(candidate);
+      ),
+      candidate,
+    );
     expect(decodedOutput(output)).toEqual({ code: 'ORIGIN_DENIED' });
     expect(queries).toBe(1);
     expect(attributeReads).toBe(0);
+    expect(candidate.waitForTimeout).toHaveBeenCalledWith(25);
   });
   it('keeps normal allowlisted recovery behavior', async () => {
     const element = (name: string, role: string) => ({
@@ -392,6 +526,7 @@ describe('Playwright CLI transport', () => {
       off: vi.fn(),
       $$: async () => [oldUser],
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async () => undefined,
     };
     const operation = new Function(
       'Date',

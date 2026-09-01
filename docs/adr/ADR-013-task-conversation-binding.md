@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted as the M3.2a design freeze. Implementation is complete; real Desktop multiple-tab E2E is still required.
+Accepted and frozen. M3.2a implementation baseline `7d9d31206e699d5a878f40abe23fb1aa1d82412e` passed real Desktop multiple-tab E2E acceptance. The Decision is unchanged.
 
 ## Context
 
@@ -173,3 +173,11 @@ Rejected. These signals are fuzzy or transport-dependent and can route task cont
 - M3.2a does not implement `EXECUTING` crash reconciliation. Existing `EXECUTING → EXECUTION_RECOVERY_REQUIRED` behavior remains.
 - Explicit rebind UX, cleanup commands, historical-binding management, enhanced diagnostics, and task-recovery UI remain M3.2c concerns.
 - LOCAL MCP and M4 remain out of scope.
+
+## Acceptance record
+
+The real Desktop acceptance task `m3-conversation-binding-dogfood-20260902` completed `PLANNING → PLAN → EXECUTING → EXECUTED → REVIEWING → DONE` at iteration 1. Its immutable GitHub range was `7d9d31206e699d5a878f40abe23fb1aa1d82412e..ee0434f86bd8a70bb0aa6703b9ab8457e8793051`, with 199 of 199 tests passing. The dogfood branch remains unmerged as acceptance evidence; its review ref is not the implementation baseline.
+
+With C1 as the explicit task conversation and unrelated C2/C3 open, bootstrap and Planner wait targeted only C1 without ambiguity. Closing C1 before review send caused an exact C1 reopen without rebind; closing it again before Reviewer wait caused another exact reopen without message replay. The canonical binding and original `boundAt` remained unchanged, confirmed review send replaced only the task-scoped pending marker, and the legacy global SessionStore remained byte-identical. C2/C3 were not selected, used as fallback, rebound, or inspected for routing.
+
+Public acceptance evidence intentionally omits the real conversation URL, message IDs, timestamps, and other user-specific Browser routing identifiers. Those values remain only in local gitignored `.chatbridge/runs/<taskId>/browser.json` evidence.

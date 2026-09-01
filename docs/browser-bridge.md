@@ -20,7 +20,7 @@ The CLI-supplied current ChatGPT page wins for send. If it is not a ChatGPT page
 
 ## M3.2a task-scoped conversation targeting
 
-M3.2a implementation is complete; real Desktop multiple-tab E2E is manual and still required. [ADR-013](adr/ADR-013-task-conversation-binding.md) adds deterministic task-aware routing without changing unscoped M1 behavior.
+M3.2a is **Frozen / Desktop E2E PASS** at implementation baseline `7d9d31206e699d5a878f40abe23fb1aa1d82412e`. [ADR-013](adr/ADR-013-task-conversation-binding.md) adds deterministic task-aware routing without changing unscoped M1 behavior.
 
 Before M3.2a, `runtime()` called `connect()` before `wait` read workspace-global `.chatbridge/session.json`. Both Library and CLI transports could therefore perform ambiguous global tab discovery before the existing durable `conversationUrl` was used, and the global file was overwritten by every send. M3.2a replaces neither M1 nor its browser engine; it adds a task-scoped path:
 
@@ -49,6 +49,8 @@ Unbound bootstrap is protected by a bounded project-wide filesystem lock coverin
 The task sidecar is strict, atomic, path-safe, project-scoped, and gitignored. It contains no prompts, responses, DOM, screenshots, cookies, credentials, or browser storage. The existing `OriginPolicy` remains the sole URL authority. Two active tasks cannot bind the same conversation; terminal tasks release exclusivity but retain historical evidence.
 
 Legacy `chatbridge send` and `chatbridge wait` continue to use `.chatbridge/session.json` unchanged, with no automatic migration. A task-aware wait timeout permits only retrying wait against the same task-scoped marker; it never authorizes resend.
+
+Real existing-browser acceptance used symbolic conversations C1 (the explicit task target) and unrelated C2/C3. With all three tabs present, explicit bootstrap and the bound Planner wait targeted only C1 without ambiguity. After C1 was closed twice, the bound review send and then the bound Reviewer wait each reopened only exact C1; neither operation resent a prior message, rebound the task, or fell back to C2/C3. The canonical binding identity and original `boundAt` remained stable, the review send atomically replaced the task-scoped planning marker, and the legacy global SessionStore remained byte-identical. Real conversation URLs, message IDs, and other user-specific Browser identifiers remain local and gitignored and are not copied into public acceptance documentation.
 
 The adapter receives an origin allowlist and validates its selected page before every DOM operation. Discovery examines URL strings only. It reuses an allowlisted ChatGPT page or creates a new tab; it never repurposes, reads, clicks, or evaluates a non-ChatGPT tab.
 

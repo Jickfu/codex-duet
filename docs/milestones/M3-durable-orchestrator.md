@@ -373,13 +373,13 @@ M3.1 is **Frozen** at implementation baseline `02a3fdb6c35a3766527543bb703b8ac67
 
 M3 overall remains **IN PROGRESS**. M3.2 is split into independently bounded stages:
 
-| Sub-stage | Scope                               | Status                                            |
-| --------- | ----------------------------------- | ------------------------------------------------- |
-| M3.2a     | Task ↔ ChatGPT conversation binding | **IMPLEMENTATION COMPLETE / E2E MANUAL REQUIRED** |
-| M3.2b     | `EXECUTING` crash reconciliation    | **PLANNED**                                       |
-| M3.2c     | Resume and Browser UX hardening     | **PLANNED**                                       |
+| Sub-stage | Scope                               | Status                        |
+| --------- | ----------------------------------- | ----------------------------- |
+| M3.2a     | Task ↔ ChatGPT conversation binding | **FROZEN / DESKTOP E2E PASS** |
+| M3.2b     | `EXECUTING` crash reconciliation    | **NEXT**                      |
+| M3.2c     | Resume and Browser UX hardening     | **PLANNED**                   |
 
-M3.2a must be implemented before M3.2b begins. It changes only deterministic Browser Control Plane routing. Frozen M0 C2C, legacy M1 behavior, M2 Git/ref safety, M3.0, M3.1, review identity, and automatic multi-round execution remain unchanged.
+M3.2a is frozen before M3.2b begins. It changes only deterministic Browser Control Plane routing. Frozen M0 C2C, legacy M1 behavior, M2 Git/ref safety, M3.0, M3.1, review identity, and automatic multi-round execution remain unchanged.
 
 ### M3.2a — Task ↔ ChatGPT Conversation Binding
 
@@ -387,7 +387,11 @@ Design status: **Frozen**
 
 Implementation status: **Complete**
 
-Desktop multiple-tab E2E: **MANUAL REQUIRED**
+Desktop multiple-tab E2E: **PASS**
+
+Overall status: **Frozen**
+
+Frozen implementation baseline: `7d9d31206e699d5a878f40abe23fb1aa1d82412e`
 
 Before M3.2a, `.chatbridge/session.json` was the only Browser checkpoint and was workspace-global. Although `SendCheckpointV2` recorded `conversationUrl` and `outgoingUserMessageId`, `runtime()` connected the browser before `wait` read that checkpoint. Both transports could therefore reject multiple ChatGPT tabs before the durable target was available, and another task's send could overwrite the only wait anchor.
 
@@ -416,7 +420,54 @@ The Library, Extension/CDP, Playwright CLI, and managed-browser paths share one 
 
 The implementation adds strict `TaskBrowserBindingV1` storage, canonical URL validation, a bounded cross-process bootstrap lock, active/historical reservation checks, pre-send selected identity, exact missing-tab reopen, task-aware CLI composition, and stable Playwright CLI targeting across independent operations. It distinguishes `SEND_OUTCOME_UNKNOWN` from confirmed-side-effect `SEND_CHECKPOINT_PERSIST_FAILED`; neither permits automatic resend. Successful waits retain the pending marker until a later confirmed send atomically replaces it.
 
-The implementation quality gate passes 199 of 199 automated tests, including concurrent bootstrap, active and historical reservation behavior, task-scoped isolation, wait-before-connect ordering, timeout and unknown-send recovery, persistence failure, exact Library/CDP routing, missing-tab reopen, Playwright CLI target stability, strict task recovery isolation, post-reservation exact re-pin ordering, and Frozen legacy regressions. This automated evidence does not replace the required real Desktop multiple-tab dogfood.
+The implementation quality gate passes 199 of 199 automated tests, including concurrent bootstrap, active and historical reservation behavior, task-scoped isolation, wait-before-connect ordering, timeout and unknown-send recovery, persistence failure, exact Library/CDP routing, missing-tab reopen, Playwright CLI target stability, strict task recovery isolation, post-reservation exact re-pin ordering, and Frozen legacy regressions.
+
+#### Real Desktop multiple-tab E2E acceptance
+
+Task `m3-conversation-binding-dogfood-20260902` completed on `agent/task-m3-conversation-binding-dogfood-20260902` with lifecycle:
+
+```text
+PLANNING → PLAN → EXECUTING → EXECUTED → REVIEWING → DONE
+```
+
+The immutable GitHub review range was `7d9d31206e699d5a878f40abe23fb1aa1d82412e..ee0434f86bd8a70bb0aa6703b9ab8457e8793051`; tests were `PASS — 199/199`, and Reviewer returned `DONE` iteration 1 with no findings. The range was exactly one commit ahead with merge base equal to `BASE_REF`, changed only `docs/acceptance/M3-conversation-binding-dogfood.md`, and contained no M1/M2/M3 implementation changes. Frozen M2 performed safe push, remote-SHA verification, and immutable review identity. Codex did not direct-push, create a PR, merge, or force-push. The dogfood branch remains unmerged and must not be deleted; its review ref is immutable acceptance evidence, not the implementation baseline.
+
+The real existing-browser environment used symbolic C1 as the explicit task target and unrelated C2/C3. With all tabs open, first task-aware PLANNING send and bound Planner wait targeted only C1 and never returned `CHATGPT_TAB_AMBIGUOUS`. After `EXECUTED`, manually closing C1 caused the bound review send to reopen exact C1 without another `--conversation-url`, rebind, or fallback. After `REVIEWING`, manually closing C1 again caused task-aware wait to read the durable binding and pending anchor first, reopen exact C1, and receive Reviewer `DONE` without resending the review message.
+
+Conversation identity stability, original `boundAt`, unrelated-tab isolation, task-scoped pending-send replacement, and legacy global SessionStore isolation all passed. The planning marker was atomically replaced by the confirmed review marker, while successful wait preserved that recovery evidence. Public documentation intentionally omits real conversation URLs, message IDs, timestamps, hashes, and unrelated-tab details; those identifiers remain only in local gitignored Browser Control Plane evidence.
+
+#### Frozen M3.2a contract
+
+1. One active durable task binds to one ChatGPT conversation.
+2. Binding is Browser Control Plane metadata.
+3. Task Browser state lives in `.chatbridge/runs/<taskId>/browser.json`.
+4. Task Browser state remains separate from Frozen M3.1 V2 orchestration checkpoints.
+5. Task-aware Browser operations read binding before Browser connection.
+6. Exact bound identity takes precedence over global tab discovery.
+7. Legacy unscoped M1 behavior remains backward compatible.
+8. Bootstrap without an explicit target remains fail-closed on ambiguity.
+9. Explicit bootstrap uses a validated exact conversation URL.
+10. Active tasks cannot share the same conversation.
+11. `BLOCKED` remains an active reservation.
+12. `DONE`, `FAILED`, and `CANCELLED` release exclusive reservation while retaining historical evidence.
+13. Historical conversation reuse requires explicit bootstrap.
+14. Bootstrap reservation happens before send side effects.
+15. Project-wide filesystem serialization prevents concurrent double-binding.
+16. Task-aware send exact-pins the selected conversation before login, prepare, and send.
+17. Task-aware Playwright CLI recovery is strict to the exact prepared conversation.
+18. Legacy unscoped M1 retains Frozen broad send recovery.
+19. A missing bound tab reopens only the exact conversation.
+20. A missing or unavailable exact conversation never falls back to another ChatGPT tab.
+21. Confirmed-send checkpoint persistence failure never authorizes resend.
+22. `SEND_OUTCOME_UNKNOWN` never authorizes resend.
+23. Successful wait preserves pending-send recovery evidence until a later confirmed send replaces it.
+24. Task-aware and legacy SessionStore paths remain isolated.
+25. Conversation URL remains immutable unless a future explicit rebind workflow is introduced.
+26. No C2C schema changes.
+27. No CodeProvider changes.
+28. No M2 review identity changes.
+29. No M3.1 automatic-loop changes.
+30. No Browser DOM, history, or storage is persisted in task binding.
 
 The complete decision, alternatives, lifecycle, multiple-task example, privacy boundary, and implementation constraints are frozen in [ADR-013](../adr/ADR-013-task-conversation-binding.md).
 
@@ -438,8 +489,8 @@ The external Skill validator could not run because the current Python environmen
 | --------- | ---------------------------------------- | ----------------------------- |
 | M3.0      | Codex Skill + Single-Round Orchestration | **FROZEN**                    |
 | M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS** |
-| M3.2a     | Task ↔ ChatGPT Conversation Binding      | **COMPLETE / E2E MANUAL**     |
-| M3.2b     | `EXECUTING` Crash Reconciliation         | **PLANNED**                   |
+| M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS** |
+| M3.2b     | `EXECUTING` Crash Reconciliation         | **NEXT**                      |
 | M3.2c     | Resume / Browser UX Hardening            | **PLANNED**                   |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

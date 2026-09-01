@@ -1,10 +1,12 @@
 # Codex Desktop Skill
 
-Status: **M3.0 and M3.1 Frozen**
+Status: **M3.0, M3.1, and M3.2a Frozen**
 
 Desktop E2E: **PASS**
 
 M3.1 Desktop multi-round E2E: **PASS**
+
+M3.2a Desktop multiple-tab E2E: **PASS**
 
 ## Dogfood regression note
 
@@ -49,13 +51,15 @@ The real M3.1 automatic multi-round acceptance completed with task `m3-multi-rou
 
 The first review deliberately returned `PLAN` iteration 2. After canonical `wait --parse` → validated Envelope JSON → `duet ingest`, the current Codex Desktop Executor automatically continued without another user prompt. The second review inspected delta `590ae12a8c9f21b8cea19480b7946c6d14fdf4c5..d99559b03eacff5e6447c95fa77fc12287e29134`, then approved formal range `02a3fdb6c35a3766527543bb703b8ac67feeb194..d99559b03eacff5e6447c95fa77fc12287e29134` as `DONE` iteration 2. Both iterations passed 168 of 168 tests. Iteration-scoped plan and review artifacts remained in durable history, and Frozen M2 performed both safe pushes. The dogfood branch remains unmerged as immutable acceptance evidence.
 
+The real M3.2a multiple-tab acceptance completed with task `m3-conversation-binding-dogfood-20260902`, immutable range `7d9d31206e699d5a878f40abe23fb1aa1d82412e..ee0434f86bd8a70bb0aa6703b9ab8457e8793051`, 199 of 199 tests passing, and final durable state `DONE` iteration 1. Explicit C1 bootstrap, bound Planner wait, and exact missing-tab reopen for review send and Reviewer wait all passed while unrelated C2/C3 remained open. The task binding and original `boundAt` stayed stable, pending-send replacement remained task-scoped, and the legacy global SessionStore stayed isolated. The dogfood branch remains unmerged; public documentation deliberately omits all real conversation and message identifiers.
+
 ## Roadmap
 
 - M3.0 Single-Round Orchestration: **Frozen**.
 - M3 overall: **IN PROGRESS**.
 - M3.1 Automatic Multi-Round Review/Fix Loop: **Frozen / Desktop E2E PASS**.
-- M3.2a Task ↔ ChatGPT Conversation Binding: **IMPLEMENTATION COMPLETE / DESKTOP E2E MANUAL REQUIRED**.
-- M3.2b `EXECUTING` Crash Reconciliation: **PLANNED**.
+- M3.2a Task ↔ ChatGPT Conversation Binding: **Frozen / Desktop E2E PASS**.
+- M3.2b `EXECUTING` Crash Reconciliation: **NEXT**.
 - M3.2c Resume / Browser UX Hardening: **PLANNED**.
 
 M3.1 builds on the frozen single-round contract. One task keeps one branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` continues automatically under the current Codex Desktop Executor, subject to deterministic guards and a configurable iteration limit. M3.1 does not add a Node agent loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
@@ -78,4 +82,4 @@ New tasks default to eight iterations. `chatbridge duet init --max-iterations <n
 
 The first task-aware send remains fail-closed: without an existing binding or explicit validated `--conversation-url`, multiple eligible ChatGPT tabs still return `CHATGPT_TAB_AMBIGUOUS`. A missing bound tab is reopened only at the exact allowlisted URL; failure returns `CHATGPT_CONVERSATION_UNAVAILABLE`, never an automatic rebind. Unscoped `send` and `wait` retain Frozen M1 behavior and `.chatbridge/session.json` compatibility.
 
-Planner and Reviewer traffic in the repository Skill uses `send --task <taskId>` and `wait --task <taskId> --parse`. A confirmed send plus wait timeout permits only another task-aware wait; it never permits replay. `EXECUTING` crash reconciliation remains deferred to M3.2b, and explicit rebind/cleanup/recovery UX remains deferred to M3.2c. Real Desktop multiple-tab E2E remains **MANUAL REQUIRED** and is not implied by the implementation test suite.
+Planner and Reviewer traffic in the repository Skill uses `send --task <taskId>` and `wait --task <taskId> --parse`. A confirmed send plus wait timeout permits only another task-aware wait; it never permits replay. Real Desktop multiple-tab acceptance passed with explicit C1 bootstrap while unrelated C2/C3 remained open, task-bound Planner wait, and exact C1 reopen for both review send and Reviewer wait after manual tab closure. The binding and original `boundAt` stayed stable, task-scoped pending send was replaced only after confirmed send, and the legacy global SessionStore remained isolated. Private conversation and message identifiers remain only in local gitignored evidence. `EXECUTING` crash reconciliation is next in M3.2b, and explicit rebind/cleanup/recovery UX remains deferred to M3.2c.

@@ -22,6 +22,12 @@ describe('codex-duet Skill', () => {
     expect(text).toContain('chatbridge wait --parse');
     expect(text).toContain('validated Envelope JSON');
     expect(text).toContain('Raw C2C');
+    expect(text).toContain('automatically');
+    expect(text).toContain('does not need to say "continue"');
+    expect(text).toContain('ITERATION_LIMIT_REACHED');
+    expect(text).toContain('BLOCKED');
+    expect(text).toContain('EXECUTION_RECOVERY_REQUIRED');
+    expect(text).toContain('PREVIOUS_REVIEW_REF..REVIEW_REF');
     expect(text).not.toContain('@openai/codex-sdk');
   });
 });

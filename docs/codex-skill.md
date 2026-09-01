@@ -4,6 +4,8 @@ Status: **M3.0 Single-Round Orchestration Frozen**
 
 Desktop E2E: **PASS**
 
+M3.1 Desktop multi-round E2E: **MANUAL REQUIRED**
+
 ## Dogfood regression note
 
 **M3.0 Desktop E2E finding #1:** the first real Desktop dogfood attempt exposed a contract mismatch between M1 `wait --parse` Envelope JSON and M3's raw-C2C-only ingest boundary. M3 now accepts both the canonical parsed JSON path and raw C2C compatibility path through the same protocol schema and lifecycle validation. That first attempt was not an E2E pass; the successful fresh-task acceptance is recorded in [the M3 milestone](milestones/M3-durable-orchestrator.md).
@@ -47,10 +49,12 @@ The dogfood task branch remains unmerged and its `REVIEW_REF` remains immutable 
 
 - M3.0 Single-Round Orchestration: **Frozen**.
 - M3 overall: **IN PROGRESS**.
-- M3.1 Automatic Multi-Round Review/Fix Loop: **DESIGN FROZEN / IMPLEMENTATION NEXT**.
+- M3.1 Automatic Multi-Round Review/Fix Loop: **IMPLEMENTATION COMPLETE / DESKTOP E2E MANUAL REQUIRED**.
 - M3.2 Recovery / Conversation Binding / UX Hardening: **PLANNED**.
 
-M3.1 must build on the frozen single-round contract. Its frozen design keeps one task branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` will eventually continue automatically, subject to deterministic guards and a configurable iteration limit. This documentation freeze does not implement that loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
+M3.1 builds on the frozen single-round contract. One task keeps one branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` continues automatically under the current Codex Desktop Executor, subject to deterministic guards and a configurable iteration limit. M3.1 does not add a Node agent loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
+
+New tasks default to eight iterations. `chatbridge duet init --max-iterations <n>` may set a durable limit from 1 through 100. Reaching it leaves the run in `REVIEWING` with `ITERATION_LIMIT_REACHED`; the Skill stops and reports the halt rather than continuing or treating it as success.
 
 ## Troubleshooting
 

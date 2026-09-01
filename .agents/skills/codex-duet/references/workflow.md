@@ -1,13 +1,15 @@
-# GITHUB single-round workflow
+# GITHUB multi-round workflow
 
 ## Resume first
 
 For a known task ID, first run `chatbridge duet status --task <taskId>`. Continue from its state:
 
+- If status contains `halt.code: ITERATION_LIMIT_REACHED`, stop and report the configured limit. Do not wait, execute, or replay a message.
+
 - `PLANNING`: finish `wait --parse`, save its complete JSON output, and ingest it.
-- `PLAN`: begin execution.
+- `PLAN`: read `currentPlanArtifact`, then begin execution and continue the current iteration.
 - `EXECUTING`: stop with `EXECUTION_RECOVERY_REQUIRED`; never replay edits blindly.
-- `EXECUTED`: resend the durable `reviewEnvelope`, then mark reviewing only after send succeeds.
+- `EXECUTED`: resend `currentReviewEnvelope`, then mark reviewing only after send succeeds.
 - `REVIEWING`: finish `wait --parse`, save its complete JSON output, and ingest it.
 - `DONE`, `BLOCKED`, `FAILED`, or `CANCELLED`: stop and report it.
 
@@ -22,11 +24,16 @@ For a known task ID, first run `chatbridge duet status --task <taskId>`. Continu
 7. With a clean worktree and at least one commit after `BASE_REF`, run `chatbridge duet prepare-review --task <taskId> --tests <status> --output <review-envelope.txt>`. This composes the Frozen M2 provider; do not reproduce its Git checks or push behavior.
 8. Run `chatbridge send --message-file <review-envelope.txt>`. Only after a confirmed send, run `chatbridge duet mark-reviewing --task <taskId>`.
 9. Run `chatbridge wait --parse`, save the complete validated Envelope JSON output, and ingest it.
+10. On a valid next-iteration `PLAN` with no halt, automatically read `currentPlanArtifact` and repeat steps 5-9 as the same Codex Desktop Executor. The user does not need to say "continue".
 
 Reviewer outcomes:
 
 - `DONE`: stop and summarize implementation, tests, immutable `REVIEW_REF`, and review success.
 - `BLOCKED`: show the user's required decision and stop.
-- `PLAN`: iteration has advanced and the new plan is durable. Say: `Additional implementation iteration required. Run is durable and ready for continuation.` Stop; M3.0 does not execute iteration 2 automatically.
+- `FAILED` or `CANCELLED`: stop; never retry a terminal result automatically.
+- `PLAN`: verify the iteration advanced by exactly one, inspect the review-directed corrections, and continue automatically. Preserve correct prior behavior and avoid expanding scope. Before editing, confirm the current branch is still the task branch; Frozen M2 remains the authoritative branch check at review preparation.
+- `ITERATION_LIMIT_REACHED`: stop and report the durable halt. Never represent it as `DONE`.
 
-Stop immediately for invalid C2C, illegal transition, Browser Bridge unavailability, ambiguous send, M2 safety rejection, unexpected branch, or dirty-worktree rejection. Never bypass a guard to finish.
+Stop immediately for invalid C2C, illegal transition, Browser Bridge unavailability, ambiguous send, M1 or M2 safety rejection, unexpected branch, dirty-worktree rejection, or `EXECUTION_RECOVERY_REQUIRED`. Never bypass a guard to finish.
+
+For iteration 1, review the formal `BASE_REF..REVIEW_REF`. For later iterations, the generated envelope identifies a durable `PREVIOUS_REVIEW_REF..REVIEW_REF` delta focus, but formal approval remains cumulative `BASE_REF..REVIEW_REF`. Code stays on the GitHub Data Plane; never send diffs through the Browser Control Plane.

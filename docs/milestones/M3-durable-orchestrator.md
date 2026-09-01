@@ -113,7 +113,9 @@ This verifies that a Browser wait timeout does not authorize message replay or E
 
 Design status: **Frozen**
 
-Implementation status: **NEXT**
+Implementation status: **Complete**
+
+Desktop multi-round E2E: **MANUAL REQUIRED**
 
 M3.1 extends the Frozen M1 Browser Control Plane, Frozen M2 GitHub Data Plane, and Frozen M3.0 single-round orchestration. It does not change `BASE_REF` or `REVIEW_REF` semantics, M2 push rules, M1 send/wait behavior, `PLAN → EXECUTING` safety, or the requirement that review send succeeds before `REVIEWING`.
 
@@ -186,7 +188,7 @@ Each prior review ref must be an ancestor of the next. History rewrite, reset be
 
 ### Durable history target
 
-M3.1 must preserve evidence for every iteration rather than overwrite the current plan and review target. The target versioned model is conceptually:
+M3.1 preserves evidence for every iteration rather than overwriting the current plan and review target. New runs use a strict, project-scoped, atomically written V2 checkpoint with durable `limits.maxIterations` configuration. The implemented model follows:
 
 ```ts
 type DuetIterationRecord = {
@@ -204,13 +206,14 @@ type DuetRunCheckpointV2 = {
   context: GitHubContextRef;
   request: { sha256: string };
   iterations: DuetIterationRecord[];
+  limits: { maxIterations: number };
   blockedPhase?: 'PLANNING' | 'EXECUTING' | 'REVIEWING';
   createdAt: string;
   updatedAt: string;
 };
 ```
 
-The target artifact history is likewise iteration-scoped:
+New artifact writes are iteration-scoped:
 
 ```text
 .chatbridge/runs/<taskId>/
@@ -224,7 +227,7 @@ The target artifact history is likewise iteration-scoped:
       review-envelope.txt
 ```
 
-The implementation must retain M3.0 V1 read compatibility through either V1 reads plus V2 writes or a safe V1-to-V2 migration. It must not mutate the V1 schema in a way that makes existing checkpoints unreadable. The exact migration mechanism is deferred to implementation.
+M3.0 V1 checkpoints remain readable without status-time mutation. The first mutating operation performs a schema-validated V1-to-V2 migration, copies legacy artifacts into iteration-scoped paths without deleting the originals, and writes the V2 checkpoint atomically. If a stopped V1 next-iteration run lacks overwritten prior-plan evidence, migration records that absence explicitly rather than inventing a hash.
 
 ### Automatic continuation and stop semantics
 
@@ -249,7 +252,7 @@ EXECUTION_RECOVERY_REQUIRED
 
 `BLOCKED` always returns control to the user; automation does not make consequential product decisions on the user's behalf.
 
-M3.1 must add deterministic runaway protection with a configurable `maxIterations` safety budget and a recommended default of 8. Reaching the budget must never be represented as `DONE`. The implementation should return a structured `ITERATION_LIMIT_REACHED` orchestration error while preserving the lifecycle state unless the existing state model later justifies a protocol-compatible alternative. This design does not add a new C2C task state.
+M3.1 adds deterministic runaway protection with `--max-iterations`, bounded from 1 through 100 and defaulting to 8. Reaching the budget is never represented as `DONE`: the run remains `REVIEWING`, persists `ITERATION_LIMIT_REACHED` halt evidence, and returns that structured orchestration error. No new C2C task state is added.
 
 ### Token and data-plane policy
 
@@ -296,10 +299,10 @@ The external Skill validator could not run because the current Python environmen
 
 ## M3 roadmap
 
-| Sub-stage | Scope                                          | Status                                  |
-| --------- | ---------------------------------------------- | --------------------------------------- |
-| M3.0      | Codex Skill + Single-Round Orchestration       | **FROZEN**                              |
-| M3.1      | Automatic Multi-Round Review/Fix Loop          | **DESIGN FROZEN / IMPLEMENTATION NEXT** |
-| M3.2      | Recovery / Conversation Binding / UX Hardening | **PLANNED**                             |
+| Sub-stage | Scope                                          | Status                                            |
+| --------- | ---------------------------------------------- | ------------------------------------------------- |
+| M3.0      | Codex Skill + Single-Round Orchestration       | **FROZEN**                                        |
+| M3.1      | Automatic Multi-Round Review/Fix Loop          | **IMPLEMENTATION COMPLETE / E2E MANUAL REQUIRED** |
+| M3.2      | Recovery / Conversation Binding / UX Hardening | **PLANNED**                                       |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

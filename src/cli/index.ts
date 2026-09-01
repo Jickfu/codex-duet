@@ -92,8 +92,9 @@ duet
   .requiredOption('--task <id>')
   .requiredOption('--request-file <path>')
   .requiredOption('--output <path>')
-  .action((o: { task: string; requestFile: string; output: string }) =>
-    duetInit(o.task, o.requestFile, o.output),
+  .option('--max-iterations <n>', 'maximum review/fix iterations', Number)
+  .action((o: { task: string; requestFile: string; output: string; maxIterations?: number }) =>
+    duetInit(o.task, o.requestFile, o.output, o.maxIterations),
   );
 duet
   .command('ingest')

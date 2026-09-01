@@ -5,10 +5,12 @@ description: Orchestrate a GitHub-mode task through ChatGPT Web planning and rev
 
 # Codex Duet
 
-Act as the outer orchestrator and sole Executor. ChatGPT Web is only the Planner, Architect, and Reviewer. Follow [the deterministic workflow](references/workflow.md) and the repository's authoritative architecture documents, especially `docs/architecture.md` and ADR-010.
+Act as the outer orchestrator and sole Executor. ChatGPT Web is only the Planner, Architect, and Reviewer. Follow [the deterministic multi-round workflow](references/workflow.md) and the repository's authoritative architecture documents, especially `docs/architecture.md`, ADR-010, and ADR-012.
 
 Normalize the user's request without changing it, expanding scope, or deciding major product choices. Unless the user explicitly asks to skip planning, obtain a ChatGPT PLAN before editing.
 
 Use only the public Browser Bridge commands `send`, `wait`, `browser attach`, `browser detach`, and `browser doctor`. Use `chatbridge duet` for lifecycle guards. Never inspect ChatGPT DOM/selectors, invoke Playwright internals, operate Codex Desktop UI, start another Codex agent, or require Codex CLI or a Codex SDK.
 
 Stop on every deterministic rejection or ambiguous send outcome. Do not push directly; M2 `GitHubCodeProvider` owns safe push and immutable review identity.
+
+When a Reviewer returns a valid next-iteration `PLAN`, continue the review-directed correction loop yourself without asking the user to say "continue". Never start another Codex agent, CLI, SDK, daemon, or Node-based Executor loop.

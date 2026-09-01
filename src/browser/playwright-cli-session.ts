@@ -38,24 +38,12 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
     try {
       return (await this.operation(commit, 30_000, 'send')).value as SendMarker;
     } catch (error) {
-      if (!(error instanceof ChatbridgeError) || error.code !== 'PLAYWRIGHT_CLI_TIMEOUT')
+      if (
+        !(error instanceof ChatbridgeError) ||
+        !['PLAYWRIGHT_CLI_TIMEOUT', 'SEND_OBSERVER_FAILED'].includes(error.code)
+      )
         throw error;
-      const recovered = (
-        await this.operation(
-          {
-            kind: 'recover',
-            conversationUrl: prepared.conversationUrl,
-            ...(prepared.previousUserMessageId
-              ? { previousUserMessageId: prepared.previousUserMessageId }
-              : {}),
-            ...(prepared.previousAssistantMessageId
-              ? { previousAssistantMessageId: prepared.previousAssistantMessageId }
-              : {}),
-          },
-          10_000,
-          'send-recovery',
-        )
-      ).value;
+      const recovered = await this.recoverSend(prepared);
       if (recovered) return recovered as SendMarker;
       throw new ChatbridgeError(
         'Send may have had a side effect, but no new user message identity could be confirmed; do not retry automatically',
@@ -87,6 +75,24 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
   }
   async close() {
     await this.runner.run([`--session=${this.session}`, 'detach'], 5000);
+  }
+  private async recoverSend(prepared: SendPreparation) {
+    return (
+      await this.operation(
+        {
+          kind: 'recover',
+          conversationUrl: prepared.conversationUrl,
+          ...(prepared.previousUserMessageId
+            ? { previousUserMessageId: prepared.previousUserMessageId }
+            : {}),
+          ...(prepared.previousAssistantMessageId
+            ? { previousAssistantMessageId: prepared.previousAssistantMessageId }
+            : {}),
+        },
+        10_000,
+        'send-recovery',
+      )
+    ).value;
   }
   private async operation(op: CliOperation, timeout?: number, phase: string = op.kind) {
     const nonce = randomBytes(16).toString('hex');
@@ -149,6 +155,7 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
       CHATGPT_MESSAGE_ID_UNAVAILABLE: 'ChatGPT did not expose a stable message identity',
       CHATGPT_TAB_AMBIGUOUS: 'Multiple ChatGPT tabs are available and no current tab is defined',
       CHATGPT_CONVERSATION_NOT_FOUND: 'The checkpoint conversation tab is not available',
+      SEND_OBSERVER_FAILED: 'Send was attempted but its outgoing message identity was not observed',
     };
     if (code === 'BRIDGE_TIMEOUT') throw new BridgeTimeoutError('Browser operation timed out');
     if (code in messages) throw new ChatbridgeError(messages[code]!, code);

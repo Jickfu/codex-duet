@@ -12,6 +12,10 @@ The outgoing user ID is the causal anchor. Wait binds to the checkpoint's exact 
 
 CLI send uses prepare and commit phases. A commit process timeout triggers one read-only recovery probe; a newly observed user ID completes the checkpoint without resending. If the side effect cannot be proven, `SEND_OUTCOME_UNKNOWN` is returned and callers must not retry automatically. Message IDs are validated as `[A-Za-z0-9_-]+` and are never interpolated into selectors.
 
+The same ambiguity rule applies when click/Enter was attempted but the outgoing-ID observer fails: recovery runs exactly once, never sends again, and either reconstructs the marker or returns `SEND_OUTCOME_UNKNOWN`. Capability failure detected before click remains `CHATGPT_MESSAGE_ID_UNAVAILABLE` because no side effect occurred.
+
+Recovery being read-only does not weaken the origin boundary. Every candidate metadata probe has its own permanently invalidating main-frame guard, validates origin before and after each DOM primitive, and aborts the entire recovery with `ORIGIN_DENIED` if a candidate escapes the allowlist. Foreign metadata is never accepted and recovery does not silently continue to another candidate after such a race.
+
 The CLI-supplied current ChatGPT page wins for send. If it is not a ChatGPT page and multiple candidates exist, send fails with `CHATGPT_TAB_AMBIGUOUS`. Wait never falls back from its exact `conversationUrl`; a missing tab fails with `CHATGPT_CONVERSATION_NOT_FOUND`.
 
 The adapter receives an origin allowlist and validates its selected page before every DOM operation. Discovery examines URL strings only. It reuses an allowlisted ChatGPT page or creates a new tab; it never repurposes, reads, clicks, or evaluates a non-ChatGPT tab.

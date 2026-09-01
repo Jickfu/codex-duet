@@ -13,6 +13,12 @@ const encoded = (args: readonly string[], value: unknown, kind = 'RESULT') => {
   const nonce = String(args[2]).match(/"nonce":"([^"]+)"/)?.[1];
   return `### Snapshot\nSECRET DOM\nCHATBRIDGE_${kind}_${nonce}_${hexEnvelope(value)}\n### Page`;
 };
+const decodedOutput = (output: string) => {
+  const payload = output.match(/CHATBRIDGE_(?:RESULT|ERROR)_[^_]+_([A-Fa-f0-9]+)/)?.[1];
+  return payload
+    ? JSON.parse(decodeURIComponent(Buffer.from(payload, 'hex').toString('ascii')))
+    : {};
+};
 describe('Playwright CLI transport', () => {
   it('returns only structured bridge data, never CLI snapshot output', async () => {
     const marker = {
@@ -124,6 +130,55 @@ describe('Playwright CLI transport', () => {
     });
     expect(run).toHaveBeenCalledTimes(3);
   });
+  it('recovers a post-click message observer failure without a second commit', async () => {
+    const marker = {
+      conversationUrl: 'https://chatgpt.com/c/recovered',
+      outgoingUserMessageId: 'user-new',
+    };
+    const run = vi.fn(async (args: readonly string[]) => {
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit')
+        return { stdout: encoded(args, { code: 'SEND_OBSERVER_FAILED' }, 'ERROR'), stderr: '' };
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'prepare'
+              ? { conversationUrl: 'https://chatgpt.com/c/original', previousUserMessageId: 'old' }
+              : marker,
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 't', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    expect(await session.sendMessage('once')).toEqual(marker);
+    expect(
+      run.mock.calls.filter(([args]) => String(args[2]).includes('"kind":"commit"')),
+    ).toHaveLength(1);
+  });
+  it('maps an unrecoverable post-click observer failure to SEND_OUTCOME_UNKNOWN', async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit')
+        return { stdout: encoded(args, { code: 'SEND_OBSERVER_FAILED' }, 'ERROR'), stderr: '' };
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'prepare'
+              ? { conversationUrl: 'https://chatgpt.com/c/test', previousUserMessageId: 'old' }
+              : null,
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 't', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await expect(session.sendMessage('unknown')).rejects.toMatchObject({
+      code: 'SEND_OUTCOME_UNKNOWN',
+    });
+  });
   it('generated operations contain navigation abort guards and no storage/screenshot access', () => {
     const code = buildCliOperation(
       {
@@ -210,6 +265,150 @@ describe('Playwright CLI transport', () => {
       `return (${buildCliOperation({ kind: 'prepare' }, 'https://chatgpt.com/', ['https://chatgpt.com'], 'ambiguous')})`,
     )();
     expect(await operation(foreign)).toContain('CHATBRIDGE_ERROR_ambiguous_');
+  });
+  it('fails closed when a recovery candidate navigates foreign during metadata query', async () => {
+    let currentUrl = 'https://chatgpt.com/c/recover';
+    let listener: ((frame: object) => void) | undefined;
+    let queries = 0;
+    let attributeReads = 0;
+    const frame = {};
+    const candidate: any = {
+      url: () => currentUrl,
+      mainFrame: () => frame,
+      on: (_event: string, value: (frame: object) => void) => (listener = value),
+      off: vi.fn(),
+      $$: vi.fn(async () => {
+        queries++;
+        currentUrl = 'https://evil.example/foreign';
+        listener?.(frame);
+        return [
+          {
+            getAttribute: async () => {
+              attributeReads++;
+              return 'foreign-id';
+            },
+          },
+        ];
+      }),
+    };
+    candidate.context = () => ({ pages: () => [candidate] });
+    const operation = new Function(
+      `return (${buildCliOperation(
+        {
+          kind: 'recover',
+          conversationUrl: 'https://chatgpt.com/c/recover',
+          previousUserMessageId: 'old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'race',
+      )})`,
+    )();
+    const output = await operation(candidate);
+    expect(decodedOutput(output)).toEqual({ code: 'ORIGIN_DENIED' });
+    expect(queries).toBe(1);
+    expect(attributeReads).toBe(0);
+  });
+  it('keeps normal allowlisted recovery behavior', async () => {
+    const element = (name: string, role: string) => ({
+      getAttribute: async (attribute: string) => (attribute === 'data-message-id' ? name : role),
+    });
+    const allowed: any = {
+      url: () => 'https://chatgpt.com/c/recover',
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [element('new-user', 'user')],
+    };
+    const foreign: any = {
+      url: () => 'https://example.test/',
+      context: () => ({ pages: () => [foreign, allowed] }),
+    };
+    const operation = new Function(
+      `return (${buildCliOperation(
+        {
+          kind: 'recover',
+          conversationUrl: 'https://chatgpt.com/c/recover',
+          previousUserMessageId: 'old-user',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'normal',
+      )})`,
+    )();
+    expect(decodedOutput(await operation(foreign))).toMatchObject({
+      value: { outgoingUserMessageId: 'new-user' },
+    });
+  });
+  it('fails before click when existing message identity capability is unavailable', async () => {
+    let clicks = 0;
+    const message = {
+      getAttribute: async (name: string) => (name === 'data-message-author-role' ? 'user' : null),
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/precommit',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [message],
+      $: async () => ({ click: async () => clicks++ }),
+    };
+    const operation = new Function(
+      `return (${buildCliOperation(
+        { kind: 'commit', message: 'secret', conversationUrl: target.url() },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'precommit',
+      )})`,
+    )();
+    expect(decodedOutput(await operation(target))).toEqual({
+      code: 'CHATGPT_MESSAGE_ID_UNAVAILABLE',
+    });
+    expect(clicks).toBe(0);
+  });
+  it('marks an outgoing-ID timeout after click as a recoverable observer failure', async () => {
+    let clicks = 0;
+    let clock = 0;
+    const oldUser = {
+      getAttribute: async (name: string) => (name === 'data-message-id' ? 'old-user' : 'user'),
+    };
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = {
+      isVisible: async () => true,
+      click: async () => {
+        clicks++;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/postclick',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [oldUser],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+    };
+    const operation = new Function(
+      'Date',
+      `return (${buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'old-user',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'postclick',
+      )})`,
+    )({ now: () => (clock += 6000) });
+    expect(decodedOutput(await operation(target))).toEqual({ code: 'SEND_OBSERVER_FAILED' });
+    expect(clicks).toBe(1);
   });
   it('classifies only infrastructure timeout, session loss, and generic CLI failures', () => {
     expect(classifyCliFailure({ killed: true }).code).toBe('PLAYWRIGHT_CLI_TIMEOUT');

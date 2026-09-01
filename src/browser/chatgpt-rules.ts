@@ -67,13 +67,14 @@ export function buildCliOperation(
     const candidates=()=>page.context().pages().filter(p=>allowed(p.url()));
     const selected=()=>{if(allowed(page.url()))return page;const items=candidates();if(items.length>1)fail('CHATGPT_TAB_AMBIGUOUS');return items[0]};
     const exact=url=>page.url()===url?page:page.context().pages().find(p=>p.url()===url);
-    const metadata=async target=>{const result=[];for(const item of await target.$$(c.selectors.message)){const id=await item.getAttribute('data-message-id');const role=await item.getAttribute('data-message-author-role');if(typeof role==='string')result.push(validId(id)?{id,role}:{role})}return result};
+    const metadata=async(target,execute=action=>action())=>{const result=[];for(const item of await execute(()=>target.$$(c.selectors.message))){const id=await execute(()=>item.getAttribute('data-message-id'));const role=await execute(()=>item.getAttribute('data-message-author-role'));if(typeof role==='string')result.push(validId(id)?{id,role}:{role})}return result};
     const latest=(items,role)=>{for(let i=items.length-1;i>=0;i--)if(items[i].role===role&&items[i].id)return items[i].id};
     const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const poll=async(predicate,timeout,timeoutCode='BRIDGE_TIMEOUT')=>{const deadline=Date.now()+timeout;while(Date.now()<deadline){const value=await predicate();if(value!==undefined)return value;await delay(50)}fail(timeoutCode)};
     let target;
     let invalid=false;
     let navigationGuard;
+    let sendLifecycle='PRE_COMMIT';
     const bind=value=>{target=value;navigationGuard=frame=>{if(frame===target.mainFrame()&&!allowed(frame.url()))invalid=true};target.on('framenavigated',navigationGuard)};
     const guard=()=>{if(!target||invalid||!allowed(target.url())){invalid=true;fail('ORIGIN_DENIED')}};
     const step=async action=>{guard();try{const value=await action();guard();return value}catch(error){guard();throw error}};
@@ -86,7 +87,8 @@ export function buildCliOperation(
         return result({value:{conversationUrl:target.url(),previousUserMessageId:latest(items,'user'),previousAssistantMessageId:latest(items,'assistant')}})
       }
       if(c.operation.kind==='recover'){
-        const inspect=async candidate=>{const items=await metadata(candidate);const id=latest(items,'user');return id&&id!==c.operation.previousUserMessageId?{conversationUrl:candidate.url(),outgoingUserMessageId:id,previousAssistantMessageId:c.operation.previousAssistantMessageId}:undefined};
+        const inspected=[];
+        const inspect=async candidate=>{if(inspected.includes(candidate))return;inspected.push(candidate);let candidateInvalid=false;let invalidate;const invalidated=new Promise(resolve=>invalidate=resolve);const listener=frame=>{if(frame===candidate.mainFrame()&&!allowed(frame.url())){candidateInvalid=true;invalidate()}};const check=()=>{if(candidateInvalid||!allowed(candidate.url())){candidateInvalid=true;fail('ORIGIN_DENIED')}};const candidateStep=async action=>{check();try{const value=await action();check();return value}catch(error){await Promise.race([delay(25),invalidated]);check();throw error}};candidate.on('framenavigated',listener);try{check();const items=await metadata(candidate,candidateStep);check();const id=latest(items,'user');return id&&id!==c.operation.previousUserMessageId?{conversationUrl:candidate.url(),outgoingUserMessageId:id,previousAssistantMessageId:c.operation.previousAssistantMessageId}:undefined}finally{candidate.off('framenavigated',listener)}};
         const preferred=allowed(page.url())?await inspect(page):undefined;if(preferred)return result({value:preferred});
         const old=exact(c.operation.conversationUrl);if(old){const recovered=await inspect(old);if(recovered)return result({value:recovered})}
         const matches=[];for(const candidate of candidates()){const recovered=await inspect(candidate);if(recovered)matches.push(recovered)}
@@ -94,10 +96,12 @@ export function buildCliOperation(
       }
       target=exact(c.operation.conversationUrl);if(!target)fail('CHATGPT_CONVERSATION_NOT_FOUND');bind(target);guard();
       if(c.operation.kind==='commit'){
+        const beforeCommit=await step(()=>metadata(target));if(beforeCommit.some(item=>!item.id))fail('CHATGPT_MESSAGE_ID_UNAVAILABLE');
         const composer=await poll(async()=>{const item=await step(()=>target.$(c.selectors.composer));return item&&await step(()=>item.isVisible())?item:undefined},10000);
         await step(()=>composer.fill(c.operation.message));const send=await step(()=>target.$(c.selectors.send));
-        if(send&&await step(()=>send.isVisible()))await step(()=>send.click({noWaitAfter:true,timeout:10000}));else await step(()=>composer.press('Enter'));
+        if(send&&await step(()=>send.isVisible())){sendLifecycle='COMMIT_ATTEMPTED';await step(()=>send.click({noWaitAfter:true,timeout:10000}))}else{sendLifecycle='COMMIT_ATTEMPTED';await step(()=>composer.press('Enter'))}
         const outgoingUserMessageId=await poll(async()=>{const id=latest(await step(()=>metadata(target)),'user');return id&&id!==c.operation.previousUserMessageId?id:undefined},10000,'CHATGPT_MESSAGE_ID_UNAVAILABLE');
+        sendLifecycle='COMMITTED';
         return result({value:{conversationUrl:target.url(),outgoingUserMessageId,previousAssistantMessageId:c.operation.previousAssistantMessageId}})
       }
       let assistantId;
@@ -106,7 +110,7 @@ export function buildCliOperation(
       let stable;
       const text=await poll(async()=>{const handles=await step(()=>target.$$(c.selectors.message));let current;for(const handle of handles)if(await step(()=>handle.getAttribute('data-message-id'))===assistantId){current=handle;break}if(!current)return;const streaming=await step(()=>current.getAttribute('data-message-streaming'))==='true'||Boolean(await step(()=>current.$(c.selectors.streaming)));const stopped=Boolean(await step(()=>target.$(c.selectors.stop)));const value=(await step(()=>current.innerText())).trim();if(streaming||stopped||!value){stable=undefined;return}if(stable===value)return value;stable=value},Math.max(1,deadline-Date.now()));
       return result({value:text})
-    }catch(error){const code=error&&typeof error.message==='string'?error.message:'';if(['ORIGIN_DENIED','BRIDGE_TIMEOUT','CHATGPT_DOCUMENT_MISSING','CHATGPT_MESSAGE_ID_UNAVAILABLE','CHATGPT_TAB_AMBIGUOUS','CHATGPT_CONVERSATION_NOT_FOUND'].includes(code))return bridgeError(code);throw error}
+    }catch(error){const code=error&&typeof error.message==='string'?error.message:'';if(sendLifecycle==='COMMIT_ATTEMPTED'&&code!=='ORIGIN_DENIED')return bridgeError('SEND_OBSERVER_FAILED');if(['ORIGIN_DENIED','BRIDGE_TIMEOUT','CHATGPT_DOCUMENT_MISSING','CHATGPT_MESSAGE_ID_UNAVAILABLE','CHATGPT_TAB_AMBIGUOUS','CHATGPT_CONVERSATION_NOT_FOUND'].includes(code))return bridgeError(code);throw error}
     finally{if(target&&navigationGuard)target.off('framenavigated',navigationGuard)}
   }`;
 }

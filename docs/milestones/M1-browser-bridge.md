@@ -10,6 +10,7 @@ Status: implementation complete; native existing-session acceptance **MANUAL REQ
 - M1.2.1 hardens navigation invalidation, CLI error taxonomy, attach-phase fallback semantics, executable discovery, diagnostics, and compatibility policy.
 - M1.2.2 removes unsupported host-global assumptions from generated CLI sandbox code, adds canonical origin-boundary matching and nonce-bound structured bridge errors, and softens interactive CDP doctor diagnostics.
 - M1.2.3 replaces assistant-count checkpoints with outgoing-user causal identity, exact conversation binding, per-poll message re-querying, and recoverable send-side-effect semantics.
+- M1.2.3 final hardening applies the full origin guard to every recovery candidate and treats post-click identity observation failure as an ambiguous send outcome.
 
 ## Frozen contract candidate
 

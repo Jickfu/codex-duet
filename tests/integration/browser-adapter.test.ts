@@ -13,7 +13,10 @@ async function fixture() {
   await page.setContent(
     `<!doctype html><main><div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button></main><script>send.onclick=()=>{window.sent=document.querySelector('#prompt-textarea').textContent}</script>`,
   );
-  return { page, adapter: new PlaywrightChatGPTWebAdapter(context, 'about:blank', 1000) };
+  return {
+    page,
+    adapter: new PlaywrightChatGPTWebAdapter(context, 'about:blank', 1000, false, ['about:blank']),
+  };
 }
 async function connectedFixture() {
   const x = await fixture();
@@ -21,6 +24,38 @@ async function connectedFixture() {
   return x;
 }
 describe('ChatGPT adapter fixture', () => {
+  it('reuses an existing ChatGPT tab without reading an unrelated tab DOM', async () => {
+    const isolated = await browser.newContext();
+    let unrelatedReads = 0;
+    await isolated.route('https://example.test/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<script>Object.defineProperty(document.body,"innerText",{get(){window.unrelatedReads=(window.unrelatedReads||0)+1;return "secret"}})</script><p>private</p>',
+      }),
+    );
+    await isolated.route('https://chatgpt.com/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<div id="prompt-textarea" role="textbox" contenteditable="true"></div>',
+      }),
+    );
+    const unrelated = await isolated.newPage();
+    await unrelated.goto('https://example.test/private');
+    const chatgpt = await isolated.newPage();
+    await chatgpt.goto('https://chatgpt.com/c/existing');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    expect(await adapter.isLoggedIn()).toBe(true);
+    unrelatedReads = await unrelated.evaluate(() => (window as any).unrelatedReads ?? 0);
+    expect(unrelatedReads).toBe(0);
+    expect(chatgpt.url()).toContain('/c/existing');
+    expect(unrelated.url()).toContain('example.test');
+    await chatgpt.goto('https://example.test/navigated-away');
+    await expect(adapter.isLoggedIn()).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
+    await isolated.close();
+  });
   it('sends through the composer', async () => {
     const { page, adapter } = await connectedFixture();
     expect(await adapter.sendMessage('hello')).toBe(0);

@@ -26,3 +26,9 @@ Browser-internal data is not model context. Waiting, selector fallback, streamin
 ## Recovery
 
 M1 atomically records the assistant-message count before send. This makes a later `wait` target the corresponding new response after CLI restart. Full task checkpoints and exactly-once execution belong to M3; browser timeout must never imply that Codex should repeat code modifications.
+
+## M1.1 connection strategy
+
+Transport and DOM remain separated. `ExistingBrowserConnection` attaches through public CDP and only detaches; `ManagedBrowserConnection` represents installed Chrome/Edge launched through official Playwright channels with a dedicated profile; `BundledBrowserConnection` is the testing/fallback variant. Selection is persisted independently of message checkpoints.
+
+Auto selection prefers an existing Chrome/Edge endpoint with a ChatGPT tab, then other attachable Chrome/Edge endpoints, installed Chrome, installed Edge, and finally an already-installed bundled Chromium. No browser download occurs automatically.

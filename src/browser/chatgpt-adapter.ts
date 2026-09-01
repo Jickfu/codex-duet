@@ -1,5 +1,6 @@
 import type { BrowserContext, Locator, Page } from 'playwright';
 import { BridgeTimeoutError, ChatbridgeError } from '../core/errors.js';
+import { OriginPolicy } from './origin-policy.js';
 
 export interface WaitOptions {
   afterCount?: number;
@@ -16,33 +17,37 @@ const ASSISTANT_SELECTOR =
   '[data-message-author-role="assistant"], article:has([data-testid*="assistant"])';
 export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
   private page?: Page;
+  private readonly originPolicy: OriginPolicy;
   constructor(
     private readonly context: BrowserContext,
     private readonly url: string,
     private readonly defaultTimeout = 120_000,
     private readonly debug = false,
-  ) {}
+    allowedOrigins: readonly string[] = ['https://chatgpt.com'],
+  ) {
+    this.originPolicy = new OriginPolicy(allowedOrigins);
+  }
   private diagnostic(message: string) {
     if (this.debug) console.error(`[DEBUG] ${message}`);
   }
   async connect() {
     const pages = this.context.pages();
     this.page =
-      pages.find((p) => p.url().includes('chatgpt.com')) ??
-      pages.at(-1) ??
-      (await this.context.newPage());
+      pages.find((page) => this.originPolicy.allows(page.url())) ?? (await this.context.newPage());
     await this.ensureConversation();
   }
   async ensureConversation() {
     const p = this.requiredPage();
-    if (this.url !== 'about:blank' && !p.url().includes('chatgpt.com')) await p.goto(this.url);
+    if (!this.originPolicy.allows(p.url())) await p.goto(this.url);
     await p.waitForLoadState('domcontentloaded');
+    this.assertPageAllowed();
   }
   private requiredPage() {
     if (!this.page) throw new ChatbridgeError('Adapter is not connected', 'NOT_CONNECTED');
     return this.page;
   }
   private composer(): Locator {
+    this.assertPageAllowed();
     const p = this.requiredPage();
     return p
       .locator(
@@ -51,9 +56,14 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
       .first();
   }
   private messages() {
+    this.assertPageAllowed();
     return this.requiredPage().locator(ASSISTANT_SELECTOR);
   }
+  private assertPageAllowed() {
+    this.originPolicy.assertAllowed(this.requiredPage().url());
+  }
   async isLoggedIn() {
+    this.assertPageAllowed();
     try {
       await this.composer().waitFor({ state: 'visible', timeout: 3000 });
       return true;
@@ -62,6 +72,7 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
     }
   }
   async sendMessage(message: string): Promise<number> {
+    this.assertPageAllowed();
     if (!message.trim()) throw new ChatbridgeError('Message must not be empty', 'EMPTY_MESSAGE');
     const before = await this.messages().count();
     const composer = this.composer();
@@ -77,6 +88,7 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
     return before;
   }
   async waitForAssistantMessage(options: WaitOptions = {}): Promise<string> {
+    this.assertPageAllowed();
     const after = options.afterCount ?? (await this.messages().count());
     const timeout = options.timeoutMs ?? this.defaultTimeout;
     this.diagnostic(`waiting for assistant index=${after}, timeout=${timeout}ms`);

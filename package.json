@@ -1,6 +1,6 @@
 {
   "name": "codex-duet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A low-token, responsibility-separated ChatGPT planner/reviewer and Codex executor bridge",
   "type": "module",
   "bin": {

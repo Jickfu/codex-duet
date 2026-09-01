@@ -1,0 +1,24 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+describe('codex-duet Skill', () => {
+  it('has valid minimal frontmatter and explicit side-effect invocation policy', async () => {
+    const skill = await readFile(
+      path.join(process.cwd(), '.agents', 'skills', 'codex-duet', 'SKILL.md'),
+      'utf8',
+    );
+    expect(skill).toMatch(/^---\r?\nname: codex-duet\r?\ndescription: .+\r?\n---/);
+    expect(skill).toContain('explicitly');
+    expect(skill).toContain('ordinary coding requests');
+  });
+  it('preserves frozen boundaries without SDK or direct push instructions', async () => {
+    const root = path.join(process.cwd(), '.agents', 'skills', 'codex-duet');
+    const text = `${await readFile(path.join(root, 'SKILL.md'), 'utf8')}\n${await readFile(path.join(root, 'references', 'workflow.md'), 'utf8')}`;
+    expect(text).toContain('GitHubCodeProvider');
+    expect(text).toContain('Do not push');
+    expect(text).toContain('Never inspect ChatGPT DOM/selectors');
+    expect(text).toContain('Never bypass');
+    expect(text).not.toContain('@openai/codex-sdk');
+  });
+});

@@ -10,6 +10,14 @@ import { doctor } from './doctor.js';
 import { detach } from './detach.js';
 import { ChatbridgeError } from '../core/errors.js';
 import { githubDoctor, githubInitTask, githubPrepareReview, githubStatus } from './github.js';
+import {
+  duetBeginExecution,
+  duetIngest,
+  duetInit,
+  duetMarkReviewing,
+  duetPrepareReview,
+  duetStatus,
+} from './duet.js';
 const program = new Command()
   .name('chatbridge')
   .description('Deterministic ChatGPT Web browser bridge')
@@ -78,6 +86,42 @@ github
   .action((o: { task: string; tests: 'PASS' | 'FAIL' | 'NOT_RUN' }) =>
     githubPrepareReview(o.task, o.tests),
   );
+const duet = program.command('duet').description('Run deterministic Codex Duet lifecycle guards');
+duet
+  .command('init')
+  .requiredOption('--task <id>')
+  .requiredOption('--request-file <path>')
+  .requiredOption('--output <path>')
+  .action((o: { task: string; requestFile: string; output: string }) =>
+    duetInit(o.task, o.requestFile, o.output),
+  );
+duet
+  .command('ingest')
+  .requiredOption('--task <id>')
+  .requiredOption('--message-file <path>')
+  .action((o: { task: string; messageFile: string }) => duetIngest(o.task, o.messageFile));
+duet
+  .command('begin-execution')
+  .requiredOption('--task <id>')
+  .action((o: { task: string }) => duetBeginExecution(o.task));
+duet
+  .command('prepare-review')
+  .requiredOption('--task <id>')
+  .addOption(
+    new Option('--tests <status>').choices(['PASS', 'FAIL', 'NOT_RUN']).makeOptionMandatory(),
+  )
+  .requiredOption('--output <path>')
+  .action((o: { task: string; tests: 'PASS' | 'FAIL' | 'NOT_RUN'; output: string }) =>
+    duetPrepareReview(o.task, o.tests, o.output),
+  );
+duet
+  .command('mark-reviewing')
+  .requiredOption('--task <id>')
+  .action((o: { task: string }) => duetMarkReviewing(o.task));
+duet
+  .command('status')
+  .requiredOption('--task <id>')
+  .action((o: { task: string }) => duetStatus(o.task));
 program
   .command('send')
   .requiredOption('--message-file <path>')

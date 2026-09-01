@@ -52,7 +52,7 @@ See [Data planes](data-plane.md), [GITHUB mode](github-mode.md), and [LOCAL mode
 
 ```mermaid
 flowchart TB
-    O[Orchestrator / Skill<br/>PLANNED M3]
+    O[Codex Desktop / Skill<br/>IMPLEMENTED M3.0]
     O --> B[Browser Control<br/>FROZEN M1]
     O --> C[CodeProvider]
     C --> L[LocalCodeProvider<br/>PLANNED M4]
@@ -72,7 +72,7 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 | C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0** |
 | Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1** |
 | `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2** |
-| Codex Skill and durable orchestration              | **PLANNED M3**              |
+| Codex Skill and single-round durable orchestration | **IMPLEMENTED M3.0**        |
 | `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**              |
 | `submit_response` MCP return path                  | **PLANNED M4**              |
 | LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**          |

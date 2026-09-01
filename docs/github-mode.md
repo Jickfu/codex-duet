@@ -29,13 +29,13 @@ sequenceDiagram
     participant W as ChatGPT Web
     participant G as GitHub
     U->>C: Request
-    C->>C: M2 init-task; create agent/task-taskId
+    C->>C: M3 duet init composes M2; create agent/task-taskId
     C->>B: PLANNING (BASE_REF)
     B->>W: compact C2C
     W->>G: Read repository at BASE_REF
     W-->>C: PLAN through deterministic browser wait
     C->>C: Edit, test, commit
-    C->>G: M2 prepare-review; push task branch
+    C->>G: M3 duet prepare-review composes M2; push task branch
     C->>G: Verify remote SHA
     C->>B: EXECUTED (BASE_REF, REVIEW_REF)
     B->>W: compact C2C

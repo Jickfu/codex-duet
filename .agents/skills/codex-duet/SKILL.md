@@ -1,0 +1,14 @@
+---
+name: codex-duet
+description: Orchestrate a GitHub-mode task through ChatGPT Web planning and review when the user explicitly says "use codex-duet", "使用 codex-duet", "用 codex-duet", or "Ask ChatGPT to plan and review". Do not invoke for ordinary coding requests because this workflow creates a task branch, commits, and a verified push.
+---
+
+# Codex Duet
+
+Act as the outer orchestrator and sole Executor. ChatGPT Web is only the Planner, Architect, and Reviewer. Follow [the deterministic workflow](references/workflow.md) and the repository's authoritative architecture documents, especially `docs/architecture.md` and ADR-010.
+
+Normalize the user's request without changing it, expanding scope, or deciding major product choices. Unless the user explicitly asks to skip planning, obtain a ChatGPT PLAN before editing.
+
+Use only the public Browser Bridge commands `send`, `wait`, `browser attach`, `browser detach`, and `browser doctor`. Use `chatbridge duet` for lifecycle guards. Never inspect ChatGPT DOM/selectors, invoke Playwright internals, operate Codex Desktop UI, start another Codex agent, or require Codex CLI or a Codex SDK.
+
+Stop on every deterministic rejection or ambiguous send outcome. Do not push directly; M2 `GitHubCodeProvider` owns safe push and immutable review identity.

@@ -151,6 +151,73 @@ describe('task-aware Browser control', () => {
     expect((await x.store.read('task-a'))?.conversation.url).not.toBe('https://chatgpt.com/c/two');
   });
 
+  it('persists the post-send stable identity from a blank bootstrap and waits on it', async () => {
+    const x = await fixture('https://chatgpt.com/');
+    await x.runs.write(run('task-a'));
+    x.sends.mockResolvedValueOnce({
+      conversationUrl: 'https://chatgpt.com/c/new-conversation',
+      outgoingUserMessageId: 'user_new',
+      previousAssistantMessageId: 'assistant_old',
+    });
+    const reservation = vi.spyOn(ConversationReservationService.prototype, 'assertAvailable');
+    await taskAwareSend('message', 'task-a', undefined, x.dependencies);
+    expect((await x.store.read('task-a'))?.conversation.url).toBe(
+      'https://chatgpt.com/c/new-conversation',
+    );
+    expect(reservation).toHaveBeenCalledTimes(1);
+    expect(reservation).toHaveBeenCalledWith(
+      'task-a',
+      'https://chatgpt.com/c/new-conversation',
+      false,
+    );
+    await taskAwareWait('task-a', 10, x.dependencies);
+    expect(x.connects).toEqual([undefined, 'https://chatgpt.com/c/new-conversation']);
+  });
+
+  it('rejects a generic explicit bootstrap before connect or send', async () => {
+    const x = await fixture('https://chatgpt.com/');
+    await x.runs.write(run('task-a'));
+    await expect(
+      taskAwareSend('message', 'task-a', 'https://chatgpt.com/', x.dependencies),
+    ).rejects.toMatchObject({ code: 'CHATGPT_CONVERSATION_IDENTITY_REQUIRED' });
+    expect(x.connects).toEqual([]);
+    expect(x.sends).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a confirmed marker still has a generic URL', async () => {
+    const x = await fixture('https://chatgpt.com/');
+    await x.runs.write(run('task-a'));
+    await expect(
+      taskAwareSend('message', 'task-a', undefined, x.dependencies),
+    ).rejects.toMatchObject({ code: 'SEND_CHECKPOINT_PERSIST_FAILED' });
+    expect(x.sends).toHaveBeenCalledOnce();
+    expect(await x.store.read('task-a')).toBeUndefined();
+  });
+
+  it('reports recovery-required when a blank bootstrap produces an already active identity', async () => {
+    const x = await fixture('https://chatgpt.com/');
+    await x.runs.write(run('task-a'));
+    await x.runs.write(run('owner'));
+    await x.store.write({
+      version: 1,
+      taskId: 'owner',
+      conversation: {
+        url: 'https://chatgpt.com/c/collision',
+        boundAt: new Date(0).toISOString(),
+      },
+    });
+    x.sends.mockResolvedValueOnce({
+      conversationUrl: 'https://chatgpt.com/c/collision',
+      outgoingUserMessageId: 'user_new',
+      previousAssistantMessageId: 'assistant_old',
+    });
+    await expect(
+      taskAwareSend('message', 'task-a', undefined, x.dependencies),
+    ).rejects.toMatchObject({ code: 'SEND_CHECKPOINT_PERSIST_FAILED' });
+    expect(x.sends).toHaveBeenCalledOnce();
+    expect(await x.store.read('task-a')).toBeUndefined();
+  });
+
   it('serializes concurrent bootstrap and rejects the loser before send', async () => {
     const x = await fixture();
     await x.runs.write(run('task-a'));
@@ -203,6 +270,28 @@ describe('task-aware Browser control', () => {
     await taskAwareSend('next', 'task-a', undefined, x.dependencies);
     expect(x.connects).toEqual(['https://chatgpt.com/c/bound']);
     expect((await x.store.read('task-a'))?.pendingSend?.outgoingUserMessageId).toBe('user_new');
+  });
+
+  it('keeps an existing binding immutable when confirmed send identity changes', async () => {
+    const x = await fixture('https://chatgpt.com/c/bound');
+    await x.runs.write(run('task-a'));
+    const old = {
+      version: 1 as const,
+      taskId: 'task-a',
+      conversation: { url: 'https://chatgpt.com/c/bound', boundAt: new Date(0).toISOString() },
+      pendingSend: { outgoingUserMessageId: 'user_old', sentAt: new Date(0).toISOString() },
+    };
+    await x.store.write(old);
+    x.sends.mockResolvedValueOnce({
+      conversationUrl: 'https://chatgpt.com/c/other',
+      outgoingUserMessageId: 'user_new',
+      previousAssistantMessageId: 'assistant_old',
+    });
+    await expect(
+      taskAwareSend('message', 'task-a', undefined, x.dependencies),
+    ).rejects.toMatchObject({ code: 'SEND_CHECKPOINT_PERSIST_FAILED' });
+    expect(await x.store.read('task-a')).toEqual(old);
+    expect(x.sends).toHaveBeenCalledOnce();
   });
 
   it('accepts a redundant exact bootstrap target and rejects implicit rebind before connect', async () => {

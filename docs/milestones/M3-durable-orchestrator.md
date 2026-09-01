@@ -412,7 +412,7 @@ chatbridge wait --parse [--task <taskId>]
 
 `--conversation-url` requires `--task` and is only an explicit bootstrap target for an unbound task. Legacy unscoped calls keep `.chatbridge/session.json` and all Frozen ambiguity behavior.
 
-An unbound first task send uses existing discovery: one eligible tab is reused and multiple tabs return `CHATGPT_TAB_AMBIGUOUS`. After confirmed send, binding and pending-send identity are persisted together. A bound send or wait reads the sidecar before browser connection, then targets exactly that conversation. A missing tab is opened at the exact allowlisted URL in the same authenticated context; failure returns `CHATGPT_CONVERSATION_UNAVAILABLE` without fallback or rebind.
+An unbound first task send uses existing discovery: one eligible tab is reused and multiple tabs return `CHATGPT_TAB_AMBIGUOUS`. A blank `/` route is only a serialized bootstrap surface. After the outgoing message ID is confirmed, the transport waits for a concrete canonical `.../c/<conversation-id>` URL; only then are final reservation, binding, and pending-send identity persisted together. A bound send or wait reads the sidecar before browser connection, then targets exactly that conversation. A missing tab is opened at the exact allowlisted URL in the same authenticated context; failure returns `CHATGPT_CONVERSATION_UNAVAILABLE` without fallback or rebind.
 
 Conversation binding remains immutable through planning, review iterations, reconnect, and process restart. Two non-terminal tasks cannot bind one conversation; implementations must serialize claims and return `CHATGPT_CONVERSATION_ALREADY_BOUND` on conflict. Terminal tasks release the reservation but retain historical binding evidence. Timeout recovery permits only another task-aware wait against the same marker and conversation, never resend.
 
@@ -446,12 +446,12 @@ Conversation identity stability, original `boundAt`, unrelated-tab isolation, ta
 6. Exact bound identity takes precedence over global tab discovery.
 7. Legacy unscoped M1 behavior remains backward compatible.
 8. Bootstrap without an explicit target remains fail-closed on ambiguity.
-9. Explicit bootstrap uses a validated exact conversation URL.
+9. Explicit bootstrap uses a validated exact concrete conversation URL; generic/new-chat routes are rejected.
 10. Active tasks cannot share the same conversation.
 11. `BLOCKED` remains an active reservation.
 12. `DONE`, `FAILED`, and `CANCELLED` release exclusive reservation while retaining historical evidence.
 13. Historical conversation reuse requires explicit bootstrap.
-14. Bootstrap reservation happens before send side effects.
+14. Concrete bootstrap reservation happens before send; blank new-chat bootstrap holds the project lock and reserves only its post-send concrete identity.
 15. Project-wide filesystem serialization prevents concurrent double-binding.
 16. Task-aware send exact-pins the selected conversation before login, prepare, and send.
 17. Task-aware Playwright CLI recovery is strict to the exact prepared conversation.
@@ -468,6 +468,12 @@ Conversation identity stability, original `boundAt`, unrelated-tab isolation, ta
 28. No M2 review identity changes.
 29. No M3.1 automatic-loop changes.
 30. No Browser DOM, history, or storage is persisted in task binding.
+
+#### Post-freeze first-send stabilization fix
+
+A real post-freeze dogfood exposed first-send blank-chat URL stabilization: the outgoing message ID was observable before the SPA changed `/` into `/c/<id>`, so the generic route could be persisted and an exact task-aware wait could not reopen the real conversation. The implementation fix is complete with regression coverage; it does not yet declare a replacement Frozen baseline.
+
+Library and Playwright CLI send confirmation now wait for a concrete stable identity after the outgoing ID. A bounded `[A-Za-z0-9_-]+` segment in a `.../c/<conversation-id>` path is required; wrong origins, credentials, encoded path ambiguity, traversal, and generic routes fail closed. Existing bound identity remains immutable, explicit `/` bootstrap is rejected, final blank-chat reservation occurs inside the existing project lock, and a confirmed send without a stable identity returns `SEND_CHECKPOINT_PERSIST_FAILED` with no automatic resend. Strict process-timeout recovery remains exact-only and may conservatively return `SEND_OUTCOME_UNKNOWN`. The pre-fix failed Desktop dogfood evidence is preserved and is not rebound, replayed, or edited. M3.2b semantics and M3.2c scope are unchanged.
 
 The complete decision, alternatives, lifecycle, multiple-task example, privacy boundary, and implementation constraints are frozen in [ADR-013](../adr/ADR-013-task-conversation-binding.md).
 

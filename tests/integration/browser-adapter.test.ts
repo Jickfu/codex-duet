@@ -8,13 +8,19 @@ beforeAll(async () => {
 afterAll(async () => browser.close());
 async function fixture() {
   const isolated = await browser.newContext();
-  const page = await isolated.newPage();
-  await page.setContent(
-    `<!doctype html><main><div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button></main><script>window.sequence=0;send.onclick=()=>{window.sent=document.querySelector('#prompt-textarea').textContent;const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-'+(++sequence);user.textContent=window.sent;messages.append(user)}</script>`,
+  await isolated.route('https://chatgpt.com/c/fixture', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: `<!doctype html><main><div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button></main><script>window.sequence=0;send.onclick=()=>{window.sent=document.querySelector('#prompt-textarea').textContent;const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-'+(++sequence);user.textContent=window.sent;messages.append(user)}</script>`,
+    }),
   );
+  const page = await isolated.newPage();
+  await page.goto('https://chatgpt.com/c/fixture');
   return {
     page,
-    adapter: new PlaywrightChatGPTWebAdapter(isolated, 'about:blank', 1000, false, ['about:blank']),
+    adapter: new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]),
   };
 }
 async function connectedFixture() {
@@ -51,7 +57,10 @@ async function expectForeignUntouched(page: any) {
     })),
   ).toEqual({ composer: '', clicks: 0, reads: 0 });
 }
-const checkpoint = (outgoingUserMessageId: string, conversationUrl = 'about:blank') => ({
+const checkpoint = (
+  outgoingUserMessageId: string,
+  conversationUrl = 'https://chatgpt.com/c/fixture',
+) => ({
   conversationUrl,
   outgoingUserMessageId,
 });
@@ -91,11 +100,53 @@ describe('ChatGPT adapter fixture', () => {
   it('sends through the composer', async () => {
     const { page, adapter } = await connectedFixture();
     expect(await adapter.sendMessage('hello')).toEqual({
-      conversationUrl: 'about:blank',
+      conversationUrl: 'https://chatgpt.com/c/fixture',
       outgoingUserMessageId: 'user-1',
     });
     expect(await page.evaluate(() => (window as any).sent)).toBe('hello');
     await page.close();
+  });
+  it('waits for a concrete URL after the outgoing ID appears on a blank new chat', async () => {
+    const isolated = await browser.newContext();
+    await isolated.route('https://chatgpt.com/', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button><script>send.onclick=()=>{const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-new';messages.append(user);setTimeout(()=>history.pushState({},'', '/c/new-conversation'),150)}</script>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    const started = Date.now();
+    expect(await adapter.sendMessage('hello')).toEqual({
+      conversationUrl: 'https://chatgpt.com/c/new-conversation',
+      outgoingUserMessageId: 'user-new',
+    });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
+    await isolated.close();
+  });
+  it('fails as confirmed-side-effect when a blank chat never gains an identity', async () => {
+    const isolated = await browser.newContext();
+    await isolated.route('https://chatgpt.com/', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button><script>window.clicks=0;send.onclick=()=>{clicks++;const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-new';messages.append(user)}</script>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 150, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    await expect(adapter.sendMessage('hello')).rejects.toMatchObject({
+      code: 'SEND_CHECKPOINT_PERSIST_FAILED',
+    });
+    expect(await page.evaluate(() => (window as any).clicks)).toBe(1);
+    await isolated.close();
   });
   it('does not leak navigation guards across long-running operations', async () => {
     const { page, adapter } = await connectedFixture();

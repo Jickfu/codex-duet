@@ -58,9 +58,9 @@ UNBOUND
 → HISTORICAL
 ```
 
-An unbound task uses Frozen M1 discovery for its first task-aware send. Zero candidates may create the configured ChatGPT page, one candidate is reused, and multiple candidates fail closed with `CHATGPT_TAB_AMBIGUOUS`. The bridge never chooses by title, recency, DOM content, or visual focus.
+An unbound task uses Frozen M1 discovery for its first task-aware send. Zero candidates may create the configured ChatGPT page, one candidate is reused, and multiple candidates fail closed with `CHATGPT_TAB_AMBIGUOUS`. The bridge never chooses by title, recency, DOM content, or visual focus. A generic new-chat route is a bootstrap surface, not a durable conversation identity. After confirmation of the outgoing message ID, the transport waits for a concrete canonical `.../c/<conversation-id>` URL before returning the marker.
 
-After a confirmed send, the bridge atomically persists both the validated conversation binding and task-scoped pending-send marker. It must not persist a binding before send confirmation. An unknown send outcome remains non-retriable; failure to persist a confirmed marker must report a distinct recovery-required error and must never authorize an automatic resend.
+After a confirmed send, the bridge atomically persists both the validated stable conversation binding and task-scoped pending-send marker. It must not persist a binding before send confirmation, and it must never persist `/` or another generic route as identity. An unknown send outcome remains non-retriable. If the message ID is confirmed but a stable identity does not appear within the bounded observation window, or the confirmed marker cannot be persisted, the bridge reports `SEND_CHECKPOINT_PERSIST_FAILED` with explicit do-not-resend semantics.
 
 The additive CLI supports explicit bootstrap targeting:
 
@@ -69,7 +69,7 @@ chatbridge send --message-file <path> --task <taskId> [--conversation-url <url>]
 chatbridge wait --parse --task <taskId>
 ```
 
-`--conversation-url` is valid only with `--task`, only while the task is unbound, and never acts as an implicit rebind. It must be an absolute URL without credentials, pass the existing `OriginPolicy`, and be used as an exact deterministic target. A value conflicting with an existing binding fails closed. Explicit rebind UX is deferred to M3.2c.
+`--conversation-url` is valid only with `--task`, only while the task is unbound, and never acts as an implicit rebind. It must be an absolute concrete conversation URL without credentials, pass the existing `OriginPolicy`, contain a bounded `[A-Za-z0-9_-]+` identity in a `.../c/<conversation-id>` path, and be used as an exact deterministic target. Generic/new-chat routes are rejected with `CHATGPT_CONVERSATION_IDENTITY_REQUIRED`. A value conflicting with an existing binding fails closed. Explicit rebind UX is deferred to M3.2c.
 
 These options extend the public `send` and `wait` Browser Control Plane primitives instead of adding duplicate `duet browser-send` or `duet browser-wait` engines. The Skill uses only this public CLI.
 
@@ -114,7 +114,7 @@ Once bound, reconnect, active-tab changes, or discovery changes cannot alter the
 
 ### Active-task uniqueness
 
-Two non-terminal durable tasks cannot bind the same normalized conversation URL. Implementations must enforce this project-wide under a lock or equivalent serialization so concurrent bootstrap writes cannot race. A conflict returns `CHATGPT_CONVERSATION_ALREADY_BOUND`.
+Two non-terminal durable tasks cannot bind the same normalized concrete conversation URL. Implementations must enforce this project-wide under a lock or equivalent serialization so concurrent bootstrap writes cannot race. Concrete discovered or explicit targets receive reservation preflight before send. A blank new-chat route remains inside the same lock from selection through send, stable identity observation, final reservation check, and persistence; the generic route itself is never reserved or written to a sidecar. A conflict returns `CHATGPT_CONVERSATION_ALREADY_BOUND`; if found only after a confirmed blank-chat send, it is surfaced as `SEND_CHECKPOINT_PERSIST_FAILED` because replay is unsafe.
 
 Terminal tasks no longer own the exclusive reservation, but their historical sidecars remain as evidence. Reusing a historical conversation for a new task is permitted only through explicit bootstrap targeting; automatic discovery must not silently recycle a historical binding. Missing or malformed run state needed to determine ownership fails closed rather than assuming the reservation is free.
 
@@ -122,7 +122,11 @@ Terminal tasks no longer own the exclusive reservation, but their historical sid
 
 `BrowserAutomationSession` owns the exact-target contract. Library/Extension/CDP, Playwright CLI, and managed-browser paths must implement the same semantics. Transport-specific tab heuristics are not allowed. A transport that cannot safely target or open the exact conversation reports an explicit capability failure; it cannot fall back to global selection.
 
-Conversation URLs are parsed and canonicalized in trusted Node code, contain no username or password, and must pass the existing `OriginPolicy`. They are passed as structured data, never interpolated into shell commands. No second allowlist is introduced.
+Conversation URLs are parsed and canonicalized in trusted Node code, contain no username or password, and must pass the existing `OriginPolicy`. Durable identities additionally require a concrete `.../c/<conversation-id>` segment and reject encoded or traversal-like path ambiguity. They are passed as structured data, never interpolated into shell commands. The restricted CLI operation performs the equivalent bounded path check without forbidden globals. No second allowlist is introduced.
+
+### Post-freeze first-send stabilization correction
+
+A real M3.2b Desktop dogfood exposed that the outgoing user message ID can appear before ChatGPT completes its SPA transition from `/` to `/c/<id>`. Both transports previously returned the page URL at that earlier instant, allowing the task layer to persist `/` and making the subsequent exact wait unavailable. The corrected confirmation boundary waits for stable concrete identity after message confirmation. Existing bound sends must still confirm the identical concrete URL; a different identity remains a confirmed-side-effect persistence failure, never an implicit rebind. Strict CLI recovery remains exact-only and may conservatively return `SEND_OUTCOME_UNKNOWN` if the process dies before stable identity is known.
 
 ### Legacy compatibility and timeout recovery
 

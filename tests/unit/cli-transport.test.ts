@@ -566,6 +566,124 @@ describe('Playwright CLI transport', () => {
     });
     expect(waits).toEqual([50]);
   });
+  it('waits for a concrete conversation URL after observing the outgoing ID', async () => {
+    const waits: number[] = [];
+    let currentUrl = 'https://chatgpt.com/';
+    let metadataReads = 0;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = { isVisible: async () => true, click: async () => undefined };
+    const target: any = {
+      url: () => currentUrl,
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async (ms: number) => {
+        waits.push(ms);
+        if (waits.length === 2) currentUrl = 'https://chatgpt.com/c/new-conversation';
+      },
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: 'https://chatgpt.com/',
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'blank-transition',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toEqual({
+      value: {
+        conversationUrl: 'https://chatgpt.com/c/new-conversation',
+        outgoingUserMessageId: 'user-new',
+      },
+    });
+    expect(waits).toEqual([50, 50]);
+  });
+
+  it('reports a confirmed-side-effect failure when a stable URL never appears', async () => {
+    let clicks = 0;
+    let clock = 0;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = {
+      isVisible: async () => true,
+      click: async () => {
+        clicks++;
+      },
+    };
+    let metadataReads = 0;
+    const target: any = {
+      url: () => 'https://chatgpt.com/',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async () => undefined,
+    };
+    const code = buildCliOperation(
+      {
+        kind: 'commit',
+        message: 'once',
+        conversationUrl: 'https://chatgpt.com/',
+        previousUserMessageId: 'user-old',
+      },
+      'https://chatgpt.com/',
+      ['https://chatgpt.com'],
+      'identity-missing',
+    );
+    const operation = new Function('Date', `return (${code})`)({ now: () => (clock += 6000) });
+    expect(decodedOutput(await operation(target))).toEqual({
+      code: 'SEND_CHECKPOINT_PERSIST_FAILED',
+    });
+    expect(clicks).toBe(1);
+  });
+
+  it('does not attempt CLI recovery for a confirmed identity persistence failure', async () => {
+    const target = 'https://chatgpt.com/';
+    const operations: string[] = [];
+    const run = vi.fn(async (args: readonly string[]) => {
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1] ?? '';
+      operations.push(kind);
+      const response =
+        kind === 'ensure'
+          ? encoded(args, { value: { conversationUrl: target } })
+          : kind === 'prepare'
+            ? encoded(args, { value: { conversationUrl: target } })
+            : encoded(args, { code: 'SEND_CHECKPOINT_PERSIST_FAILED' }, 'ERROR');
+      return { stdout: response, stderr: '' };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'stable', target, [
+      'https://chatgpt.com',
+    ]);
+    await session.connect();
+    await expect(session.sendMessage('message')).rejects.toMatchObject({
+      code: 'SEND_CHECKPOINT_PERSIST_FAILED',
+    });
+    expect(operations).toEqual(['ensure', 'prepare', 'commit']);
+  });
   it('fails closed when a recovery candidate navigates foreign during metadata query', async () => {
     let currentUrl = 'https://chatgpt.com/c/recover';
     let listener: ((frame: object) => void) | undefined;

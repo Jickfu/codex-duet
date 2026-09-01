@@ -194,6 +194,8 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
       CHATGPT_CONVERSATION_NOT_FOUND: 'The checkpoint conversation tab is not available',
       CHATGPT_CONVERSATION_UNAVAILABLE: 'The bound ChatGPT conversation is unavailable',
       SEND_OBSERVER_FAILED: 'Send was attempted but its outgoing message identity was not observed',
+      SEND_CHECKPOINT_PERSIST_FAILED:
+        'Send was confirmed but no stable conversation identity appeared; do not resend automatically',
     };
     if (code === 'BRIDGE_TIMEOUT') throw new BridgeTimeoutError('Browser operation timed out');
     if (code in messages) throw new ChatbridgeError(messages[code]!, code);

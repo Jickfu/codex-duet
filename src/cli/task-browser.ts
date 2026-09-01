@@ -55,13 +55,14 @@ export async function taskAwareSend(
   await dependencies.lock.withLock(async () => {
     await reservations.assertTaskExists(taskId);
     const existing = await dependencies.store.read(taskId);
-    const explicit = conversationUrl ? urls.canonicalize(conversationUrl) : undefined;
-    if (existing && explicit && explicit !== urls.canonicalize(existing.conversation.url))
+    const explicit = conversationUrl ? urls.canonicalizeStable(conversationUrl) : undefined;
+    const existingUrl = existing ? urls.canonicalizeStable(existing.conversation.url) : undefined;
+    if (existing && explicit && explicit !== existingUrl)
       throw new ChatbridgeError(
         'Explicit conversation URL conflicts with the durable task binding',
         'CHATGPT_CONVERSATION_BINDING_CONFLICT',
       );
-    const target = existing ? urls.canonicalize(existing.conversation.url) : explicit;
+    const target = existingUrl ?? explicit;
     const connected = await dependencies.connect(target);
     try {
       const selected = urls.canonicalize(connected.selection.conversationUrl);
@@ -70,7 +71,8 @@ export async function taskAwareSend(
           'Browser selected a different ChatGPT conversation',
           'CHATGPT_CONVERSATION_UNAVAILABLE',
         );
-      await reservations.assertAvailable(taskId, selected, Boolean(existing || explicit));
+      if (urls.isStableConversationUrl(selected))
+        await reservations.assertAvailable(taskId, selected, Boolean(existing || explicit));
       const pinned = await connected.adapter.connect({ conversationUrl: selected });
       if (urls.canonicalize(pinned.conversationUrl) !== selected)
         throw new ChatbridgeError(
@@ -82,8 +84,16 @@ export async function taskAwareSend(
           'ChatGPT is not logged in. Run `chatbridge browser open`, log in manually, then retry.',
         );
       const marker = await connected.adapter.sendMessage(message);
-      const confirmed = urls.canonicalize(marker.conversationUrl);
-      if (existing && confirmed !== urls.canonicalize(existing.conversation.url))
+      let confirmed: string;
+      try {
+        confirmed = urls.canonicalizeStable(marker.conversationUrl);
+      } catch (error) {
+        throw new ChatbridgeError(
+          `Send was confirmed but no stable conversation identity could be persisted; do not resend automatically${error instanceof ChatbridgeError ? `: ${error.code}` : ''}`,
+          'SEND_CHECKPOINT_PERSIST_FAILED',
+        );
+      }
+      if (existing && confirmed !== existingUrl)
         throw new ChatbridgeError(
           'Send was confirmed but the conversation identity changed; do not resend automatically',
           'SEND_CHECKPOINT_PERSIST_FAILED',

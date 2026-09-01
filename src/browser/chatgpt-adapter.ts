@@ -143,8 +143,29 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
           );
         throw error;
       }
+      let conversationUrl: string;
+      try {
+        conversationUrl = await this.pollValue(
+          guard,
+          async () => {
+            const current = page.url();
+            return this.conversationUrls.isStableConversationUrl(current)
+              ? this.conversationUrls.canonicalizeStable(current)
+              : undefined;
+          },
+          Math.min(10_000, this.defaultTimeout),
+          'Stable conversation identity did not appear after confirmed send',
+        );
+      } catch (error) {
+        if (error instanceof BridgeTimeoutError)
+          throw new ChatbridgeError(
+            'Send was confirmed but no stable conversation identity appeared; do not resend automatically',
+            'SEND_CHECKPOINT_PERSIST_FAILED',
+          );
+        throw error;
+      }
       return {
-        conversationUrl: page.url(),
+        conversationUrl,
         outgoingUserMessageId,
         ...(previousAssistantMessageId ? { previousAssistantMessageId } : {}),
       };

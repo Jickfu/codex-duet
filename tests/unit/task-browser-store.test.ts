@@ -91,4 +91,26 @@ describe('ConversationUrlPolicy', () => {
   ])('rejects unsafe conversation URL %s', (value) => {
     expect(() => urls.canonicalize(value)).toThrow();
   });
+
+  it.each([
+    ['https://chatgpt.com/c/conversation_1', 'https://chatgpt.com/c/conversation_1'],
+    [
+      'HTTPS://CHATGPT.COM:443/project/example/c/conversation-2#turn',
+      'https://chatgpt.com/project/example/c/conversation-2',
+    ],
+  ])('canonicalizes concrete conversation identity %s', (value, expected) => {
+    expect(urls.canonicalizeStable(value)).toBe(expected);
+    expect(urls.isStableConversationUrl(value)).toBe(true);
+  });
+
+  it.each([
+    'https://chatgpt.com/',
+    'https://chatgpt.com/new',
+    'https://chatgpt.com/c/',
+    'https://chatgpt.com/c/%2e%2e',
+    `https://chatgpt.com/c/${'a'.repeat(129)}`,
+  ])('rejects generic or unsafe durable identity %s', (value) => {
+    expect(urls.isStableConversationUrl(value)).toBe(false);
+    expect(() => urls.canonicalizeStable(value)).toThrow();
+  });
 });

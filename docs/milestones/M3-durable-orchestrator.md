@@ -369,11 +369,58 @@ M3.1 is **Frozen** at implementation baseline `02a3fdb6c35a3766527543bb703b8ac67
 10. Frozen M2 remains solely responsible for push and ref safety; Frozen M1 carries only compact Browser Control Plane data while source and diffs remain on the GitHub Data Plane.
 11. Full `EXECUTING` crash reconciliation and conversation binding remain outside M3.1.
 
+## M3.2 decomposition
+
+M3 overall remains **IN PROGRESS**. M3.2 is split into independently bounded stages:
+
+| Sub-stage | Scope                               | Status                                  |
+| --------- | ----------------------------------- | --------------------------------------- |
+| M3.2a     | Task ↔ ChatGPT conversation binding | **DESIGN FROZEN / IMPLEMENTATION NEXT** |
+| M3.2b     | `EXECUTING` crash reconciliation    | **PLANNED**                             |
+| M3.2c     | Resume and Browser UX hardening     | **PLANNED**                             |
+
+M3.2a must be implemented before M3.2b begins. It changes only deterministic Browser Control Plane routing. Frozen M0 C2C, legacy M1 behavior, M2 Git/ref safety, M3.0, M3.1, review identity, and automatic multi-round execution remain unchanged.
+
+### M3.2a — Task ↔ ChatGPT Conversation Binding
+
+Design status: **Frozen**
+
+Implementation status: **Next**
+
+The current `.chatbridge/session.json` is workspace-global. Although `SendCheckpointV2` records `conversationUrl` and `outgoingUserMessageId`, `runtime()` connects the browser before `wait` reads that checkpoint. Both current transports may therefore reject multiple ChatGPT tabs before the durable target is available, and another task's send can overwrite the only wait anchor.
+
+M3.2a freezes one durable task ↔ one immutable ChatGPT conversation. It uses a separate strict, atomic, path-safe, project-scoped, gitignored sidecar:
+
+```text
+.chatbridge/runs/<taskId>/browser.json
+```
+
+The sidecar holds only task ID, validated conversation URL, message IDs, timestamps, and minimal binding state. It is Browser Control Plane metadata, not C2C, CodeProvider, source, `BASE_REF`, or `REVIEW_REF` state. Frozen M3.1 `DuetRunCheckpointV2` remains unchanged.
+
+The public CLI design is additive:
+
+```text
+chatbridge send --message-file <path> [--task <taskId>] [--conversation-url <url>]
+chatbridge wait --parse [--task <taskId>]
+```
+
+`--conversation-url` requires `--task` and is only an explicit bootstrap target for an unbound task. Legacy unscoped calls keep `.chatbridge/session.json` and all Frozen ambiguity behavior.
+
+An unbound first task send uses existing discovery: one eligible tab is reused and multiple tabs return `CHATGPT_TAB_AMBIGUOUS`. After confirmed send, binding and pending-send identity are persisted together. A bound send or wait reads the sidecar before browser connection, then targets exactly that conversation. A missing tab is opened at the exact allowlisted URL in the same authenticated context; failure returns `CHATGPT_CONVERSATION_UNAVAILABLE` without fallback or rebind.
+
+Conversation binding remains immutable through planning, review iterations, reconnect, and process restart. Two non-terminal tasks cannot bind one conversation; implementations must serialize claims and return `CHATGPT_CONVERSATION_ALREADY_BOUND` on conflict. Terminal tasks release the reservation but retain historical binding evidence. Timeout recovery permits only another task-aware wait against the same marker and conversation, never resend.
+
+The Library, Extension/CDP, Playwright CLI, and managed-browser paths share one `BrowserAutomationSession` exact-target contract. A transport that cannot safely implement it fails closed rather than using global selection. Existing `OriginPolicy` remains authoritative and no browser/chat content or authentication material is persisted.
+
+The complete decision, alternatives, lifecycle, multiple-task example, privacy boundary, and implementation constraints are frozen in [ADR-013](../adr/ADR-013-task-conversation-binding.md).
+
+M3.2a does not implement `EXECUTING` crash reconciliation; `EXECUTING → EXECUTION_RECOVERY_REQUIRED` remains unchanged. Explicit rebind UX, cleanup, historical binding management, enhanced diagnostics, and recovery UI remain M3.2c work. LOCAL MCP and M4 are out of scope.
+
 ## Known issues
 
 ### ChatGPT tab ambiguity
 
-When multiple ChatGPT tabs exist without an explicit current target, Frozen M1 fails closed with `CHATGPT_TAB_AMBIGUOUS`. This remains a UX/hardening issue; task/conversation binding is a possible future direction. M1 is unchanged by this freeze.
+When multiple ChatGPT tabs exist without an explicit current target, Frozen M1 fails closed with `CHATGPT_TAB_AMBIGUOUS`. M3.2a freezes additive deterministic targeting for task-aware operations; unscoped M1 remains unchanged, and broader tab/recovery UX remains M3.2c work.
 
 ### Skill validator environment
 
@@ -381,10 +428,12 @@ The external Skill validator could not run because the current Python environmen
 
 ## M3 roadmap
 
-| Sub-stage | Scope                                          | Status                        |
-| --------- | ---------------------------------------------- | ----------------------------- |
-| M3.0      | Codex Skill + Single-Round Orchestration       | **FROZEN**                    |
-| M3.1      | Automatic Multi-Round Review/Fix Loop          | **FROZEN / DESKTOP E2E PASS** |
-| M3.2      | Recovery / Conversation Binding / UX Hardening | **NEXT**                      |
+| Sub-stage | Scope                                    | Status                        |
+| --------- | ---------------------------------------- | ----------------------------- |
+| M3.0      | Codex Skill + Single-Round Orchestration | **FROZEN**                    |
+| M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS** |
+| M3.2a     | Task ↔ ChatGPT Conversation Binding      | **DESIGN FROZEN / NEXT**      |
+| M3.2b     | `EXECUTING` Crash Reconciliation         | **PLANNED**                   |
+| M3.2c     | Resume / Browser UX Hardening            | **PLANNED**                   |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

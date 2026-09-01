@@ -18,6 +18,34 @@ Recovery being read-only does not weaken the origin boundary. Every candidate me
 
 The CLI-supplied current ChatGPT page wins for send. If it is not a ChatGPT page and multiple candidates exist, send fails with `CHATGPT_TAB_AMBIGUOUS`. Wait never falls back from its exact `conversationUrl`; a missing tab fails with `CHATGPT_CONVERSATION_NOT_FOUND`.
 
+## M3.2a task-scoped conversation targeting
+
+M3.2a design is Frozen; implementation is next. [ADR-013](adr/ADR-013-task-conversation-binding.md) adds deterministic task-aware routing without changing unscoped M1 behavior.
+
+The current implementation calls `connect()` before `wait` reads workspace-global `.chatbridge/session.json`. Both Library and CLI transports can therefore perform ambiguous global tab discovery before the existing durable `conversationUrl` is used. The global file is also overwritten by every send. M3.2a replaces neither M1 nor its browser engine; it adds a task-scoped path:
+
+```text
+.chatbridge/runs/<taskId>/browser.json
+  conversation URL
+  binding timestamp
+  task-scoped pending send identity
+```
+
+Task-aware CLI direction is:
+
+```text
+chatbridge send --message-file <path> --task <taskId> [--conversation-url <url>]
+chatbridge wait --parse --task <taskId>
+```
+
+The task binding is read before browser connection. An unbound first send retains Frozen discovery and fails with `CHATGPT_TAB_AMBIGUOUS` when multiple eligible tabs exist, unless the caller provides an explicit validated bootstrap URL. Once bound, send and wait target exactly that conversation even when other ChatGPT tabs exist. If its tab is missing, the bridge opens the exact allowlisted URL in the attached authenticated context; failure returns `CHATGPT_CONVERSATION_UNAVAILABLE` and never selects another conversation.
+
+`BrowserAutomationSession` will expose one additive transport-independent targeting primitive, conceptually `connect({ conversationUrl })`. Library/Extension/CDP, Playwright CLI, and managed-browser transports must implement identical exact-target behavior or fail closed with an explicit capability error. No transport may fall back to fuzzy tab selection.
+
+The task sidecar is strict, atomic, path-safe, project-scoped, and gitignored. It contains no prompts, responses, DOM, screenshots, cookies, credentials, or browser storage. The existing `OriginPolicy` remains the sole URL authority. Two active tasks cannot bind the same conversation; terminal tasks release exclusivity but retain historical evidence.
+
+Legacy `chatbridge send` and `chatbridge wait` continue to use `.chatbridge/session.json` unchanged, with no automatic migration. A task-aware wait timeout permits only retrying wait against the same task-scoped marker; it never authorizes resend.
+
 The adapter receives an origin allowlist and validates its selected page before every DOM operation. Discovery examines URL strings only. It reuses an allowlisted ChatGPT page or creates a new tab; it never repurposes, reads, clicks, or evaluates a non-ChatGPT tab.
 
 Screenshots are not normal transport. Real-site tests are manual and optional. Offline fixture tests model sending, delayed response creation, streaming completion, multiple messages, malformed protocol, and timeout.

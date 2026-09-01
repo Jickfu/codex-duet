@@ -52,8 +52,10 @@ See [Data planes](data-plane.md), [GITHUB mode](github-mode.md), and [LOCAL mode
 
 ```mermaid
 flowchart TB
-    O[Codex Desktop / Skill<br/>IMPLEMENTED M3.0]
+    O[Codex Desktop / Skill<br/>FROZEN M3.0/M3.1]
     O --> B[Browser Control<br/>FROZEN M1]
+    O --> T[Task Conversation Binding<br/>M3.2a DESIGN FROZEN]
+    T --> B
     O --> C[CodeProvider]
     C --> L[LocalCodeProvider<br/>PLANNED M4]
     C --> G[GitHubCodeProvider<br/>FROZEN M2]
@@ -72,7 +74,9 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 | C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0** |
 | Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1** |
 | `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2** |
-| Codex Skill and single-round durable orchestration | **IMPLEMENTED M3.0**        |
+| Codex Skill and single-round durable orchestration | **FROZEN M3.0**             |
+| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**  |
+| Task-scoped ChatGPT conversation binding           | **M3.2a DESIGN FROZEN**     |
 | `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**              |
 | `submit_response` MCP return path                  | **PLANNED M4**              |
 | LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**          |
@@ -112,7 +116,12 @@ Every future milestone must preserve these invariants:
 13. Codex Desktop is the primary product's outer orchestrator.
 14. The primary product path does not depend on Codex CLI or the Codex SDK.
 15. A future headless Codex SDK mode is optional and cannot alter the primary architecture.
+16. One active durable task binds to one ChatGPT conversation through task-scoped Browser Control Plane metadata.
+17. Task-aware Browser operations resolve exact durable conversation identity before browser connection; unscoped M1 discovery remains fail-closed and backward compatible.
+18. Conversation binding does not alter C2C, CodeProvider state, or formal review identity.
 
 ## Recovery and token efficiency
 
 Browser-internal waiting, selector fallback, streaming detection, and text extraction stay inside deterministic TypeScript infrastructure. M1 stores a causal send checkpoint and returns only the complete assistant control payload. A timeout never authorizes Codex to repeat code modifications. Full task checkpoints and exactly-once execution belong to M3.
+
+M3.2a separates task Browser routing into `.chatbridge/runs/<taskId>/browser.json` rather than changing Frozen M3.1 V2 checkpoints. Task-aware send/wait use an exact conversation target and independent pending-send marker; legacy unscoped operations retain workspace-global `.chatbridge/session.json`. See [ADR-013](adr/ADR-013-task-conversation-binding.md).

@@ -1,0 +1,41 @@
+{
+  "name": "codex-duet",
+  "version": "0.1.0",
+  "description": "A low-token, responsibility-separated ChatGPT planner/reviewer and Codex executor bridge",
+  "type": "module",
+  "bin": {
+    "chatbridge": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.17.0",
+  "dependencies": {
+    "commander": "^14.0.0",
+    "playwright": "^1.55.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.34.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  },
+  "license": "Apache-2.0"
+}

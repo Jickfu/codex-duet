@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PlaywrightCliChatGPTSession } from '../../src/browser/playwright-cli-session.js';
 import { buildCliOperation } from '../../src/browser/chatgpt-rules.js';
+import { classifyCliFailure } from '../../src/browser/playwright-cli-runner.js';
+import { ChatbridgeError } from '../../src/core/errors.js';
 
 const encoded = (value: unknown) =>
   `### Snapshot\nSECRET DOM\nCHATBRIDGE_RESULT_${Buffer.from(JSON.stringify(value)).toString('base64')}\n### Page`;
@@ -43,5 +45,41 @@ describe('Playwright CLI transport', () => {
     );
     expect(code).toContain('framenavigated');
     expect(code).not.toMatch(/cookies\(|localStorage|sessionStorage|storageState|screenshot/);
+  });
+  it('classifies timeout, origin, session loss, and generic CLI failures', () => {
+    expect(classifyCliFailure({ killed: true }).code).toBe('PLAYWRIGHT_CLI_TIMEOUT');
+    expect(classifyCliFailure({ stderr: 'ORIGIN_DENIED' }).code).toBe('ORIGIN_DENIED');
+    expect(classifyCliFailure({ stderr: 'browser session not found' }).code).toBe(
+      'PLAYWRIGHT_CLI_SESSION_LOST',
+    );
+    expect(classifyCliFailure({ stderr: 'unexpected failure' }).code).toBe('PLAYWRIGHT_CLI_FAILED');
+  });
+  it('maps only a real CLI timeout to BridgeTimeoutError', async () => {
+    const timeout = new PlaywrightCliChatGPTSession(
+      {
+        run: async () => {
+          throw new ChatbridgeError('timeout', 'PLAYWRIGHT_CLI_TIMEOUT');
+        },
+      },
+      't',
+      'https://chatgpt.com/',
+      ['https://chatgpt.com'],
+    );
+    await expect(
+      timeout.waitForAssistantMessage({ afterCount: 0, timeoutMs: 10 }),
+    ).rejects.toMatchObject({ code: 'BRIDGE_TIMEOUT' });
+    const lost = new PlaywrightCliChatGPTSession(
+      {
+        run: async () => {
+          throw new ChatbridgeError('lost', 'PLAYWRIGHT_CLI_SESSION_LOST');
+        },
+      },
+      't',
+      'https://chatgpt.com/',
+      ['https://chatgpt.com'],
+    );
+    await expect(
+      lost.waitForAssistantMessage({ afterCount: 0, timeoutMs: 10 }),
+    ).rejects.toMatchObject({ code: 'PLAYWRIGHT_CLI_SESSION_LOST' });
   });
 });

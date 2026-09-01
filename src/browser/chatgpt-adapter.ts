@@ -1,6 +1,5 @@
-import type { BrowserContext, Locator, Page } from 'playwright';
+import type { BrowserContext, Frame, Page } from 'playwright';
 import { BridgeTimeoutError, ChatbridgeError } from '../core/errors.js';
-import { OriginPolicy } from './origin-policy.js';
 import {
   CHATGPT_ASSISTANT_SELECTOR,
   CHATGPT_COMPOSER_SELECTOR,
@@ -8,6 +7,7 @@ import {
   CHATGPT_STOP_SELECTOR,
   CHATGPT_STREAMING_SELECTOR,
 } from './chatgpt-rules.js';
+import { OriginPolicy } from './origin-policy.js';
 
 export interface WaitOptions {
   afterCount?: number;
@@ -20,6 +20,7 @@ export interface ChatGPTWebAdapter {
   sendMessage(message: string): Promise<number>;
   waitForAssistantMessage(options?: WaitOptions): Promise<string>;
 }
+
 export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
   private page?: Page;
   private readonly originPolicy: OriginPolicy;
@@ -29,134 +30,199 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
     private readonly defaultTimeout = 120_000,
     private readonly debug = false,
     allowedOrigins: readonly string[] = ['https://chatgpt.com'],
+    private readonly operationBoundary?: (name: 'before-text-extraction') => Promise<void> | void,
   ) {
     this.originPolicy = new OriginPolicy(allowedOrigins);
   }
-  private diagnostic(message: string) {
-    if (this.debug) console.error(`[DEBUG] ${message}`);
-  }
   async connect() {
-    const pages = this.context.pages();
     this.page =
-      pages.find((page) => this.originPolicy.allows(page.url())) ?? (await this.context.newPage());
+      this.context.pages().find((page) => this.originPolicy.allows(page.url())) ??
+      (await this.context.newPage());
     await this.ensureConversation();
   }
   async ensureConversation() {
-    const p = this.requiredPage();
-    if (!this.originPolicy.allows(p.url())) await p.goto(this.url);
-    await p.waitForLoadState('domcontentloaded');
+    const page = this.requiredPage();
+    if (!this.originPolicy.allows(page.url())) await page.goto(this.url);
+    await page.waitForLoadState('domcontentloaded');
     this.assertPageAllowed();
+  }
+  async isLoggedIn() {
+    const guard = this.guard();
+    try {
+      const root = await this.root(guard);
+      const composer = await guard.run(() => root.$(CHATGPT_COMPOSER_SELECTOR));
+      return composer ? await guard.run(() => composer.isVisible()) : false;
+    } finally {
+      guard.dispose();
+    }
+  }
+  async sendMessage(message: string) {
+    if (!message.trim()) throw new ChatbridgeError('Message must not be empty', 'EMPTY_MESSAGE');
+    const guard = this.guard();
+    try {
+      const root = await this.root(guard);
+      const before = (await guard.run(() => root.$$(CHATGPT_ASSISTANT_SELECTOR))).length;
+      const composer = await this.pollValue(
+        guard,
+        async () => {
+          const item = await guard.run(() => root.$(CHATGPT_COMPOSER_SELECTOR));
+          return item && (await guard.run(() => item.isVisible())) ? item : undefined;
+        },
+        10_000,
+        'Composer did not become visible',
+      );
+      await guard.run(() => composer.fill(message));
+      const send = await guard.run(() => root.$(CHATGPT_SEND_SELECTOR));
+      if (send && (await guard.run(() => send.isVisible()))) await guard.run(() => send.click());
+      else await guard.run(() => composer.press('Enter'));
+      this.diagnostic(`assistant baseline=${before}`);
+      return before;
+    } finally {
+      guard.dispose();
+    }
+  }
+  async waitForAssistantMessage(options: WaitOptions = {}) {
+    const timeout = options.timeoutMs ?? this.defaultTimeout;
+    const guard = this.guard();
+    const deadline = Date.now() + timeout;
+    try {
+      const root = await this.root(guard);
+      const initial =
+        options.afterCount ?? (await guard.run(() => root.$$(CHATGPT_ASSISTANT_SELECTOR))).length;
+      const target = await this.pollValue(
+        guard,
+        async () => {
+          const items = await guard.run(() => root.$$(CHATGPT_ASSISTANT_SELECTOR));
+          return items.length > initial ? items[initial] : undefined;
+        },
+        timeout,
+        'Assistant message did not appear',
+      );
+      await this.pollValue(
+        guard,
+        async () => ((await guard.run(() => target.isVisible())) ? true : undefined),
+        this.remaining(deadline),
+        'Assistant message did not become visible',
+      );
+      await this.pollValue(
+        guard,
+        async () => {
+          const streaming =
+            (await guard.run(() => target.getAttribute('data-message-streaming'))) === 'true' ||
+            Boolean(await guard.run(() => target.$(CHATGPT_STREAMING_SELECTOR)));
+          const stopped = Boolean(await guard.run(() => root.$(CHATGPT_STOP_SELECTOR)));
+          const text = await guard.run(() => target.textContent());
+          return !streaming && !stopped && (text?.trim().length ?? 0) > 0 ? true : undefined;
+        },
+        this.remaining(deadline),
+        'Assistant response did not finish streaming',
+      );
+      await guard.run(async () => {
+        await this.operationBoundary?.('before-text-extraction');
+      });
+      const text = (await guard.run(() => target.innerText())).trim();
+      this.diagnostic(`assistant response complete, characters=${text.length}`);
+      return text;
+    } catch (error) {
+      if (error instanceof ChatbridgeError && error.code === 'ORIGIN_DENIED') throw error;
+      // Execution-context destruction can be reported just before Playwright emits
+      // the navigation event. Give that event one turn so it wins the taxonomy.
+      await guard.delay(25);
+      // A navigation can destroy an ElementHandle's execution context before Playwright
+      // delivers `framenavigated`; classify from the page's current origin as well.
+      this.assertPageAllowed();
+      if (error instanceof BridgeTimeoutError) throw error;
+      throw new BridgeTimeoutError(
+        `Timed out after ${timeout}ms waiting for a complete assistant response`,
+      );
+    } finally {
+      guard.dispose();
+    }
+  }
+  private async root(guard: OperationGuard) {
+    const root = await guard.run(() => this.requiredPage().$('html'));
+    if (!root)
+      throw new ChatbridgeError('ChatGPT document root is unavailable', 'CHATGPT_DOCUMENT_MISSING');
+    return root;
+  }
+  private async pollValue<T>(
+    guard: OperationGuard,
+    predicate: () => Promise<T | undefined>,
+    timeout: number,
+    message: string,
+  ): Promise<T> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      guard.assertValid();
+      const value = await predicate();
+      guard.assertValid();
+      if (value !== undefined) return value;
+      await guard.delay(50);
+    }
+    throw new BridgeTimeoutError(message);
+  }
+  private remaining(deadline: number) {
+    return Math.max(1, deadline - Date.now());
   }
   private requiredPage() {
     if (!this.page) throw new ChatbridgeError('Adapter is not connected', 'NOT_CONNECTED');
     return this.page;
   }
-  private composer(): Locator {
-    this.assertPageAllowed();
-    const p = this.requiredPage();
-    return p.locator(CHATGPT_COMPOSER_SELECTOR).first();
-  }
-  private messages() {
-    this.assertPageAllowed();
-    return this.requiredPage().locator(CHATGPT_ASSISTANT_SELECTOR);
-  }
   private assertPageAllowed() {
     this.originPolicy.assertAllowed(this.requiredPage().url());
   }
-  async isLoggedIn() {
+  private guard() {
     this.assertPageAllowed();
-    try {
-      await this.composer().waitFor({ state: 'visible', timeout: 3000 });
-      return true;
-    } catch {
-      return false;
-    }
+    return new OperationGuard(this.requiredPage(), this.originPolicy);
   }
-  async sendMessage(message: string): Promise<number> {
-    this.assertPageAllowed();
-    if (!message.trim()) throw new ChatbridgeError('Message must not be empty', 'EMPTY_MESSAGE');
-    return this.withOriginGuard(async () => {
-      const before = await this.messages().count();
-      const composer = this.composer();
-      this.diagnostic(`assistant baseline=${before}`);
-      await composer.waitFor({ state: 'visible', timeout: 10_000 });
-      await composer.fill(message);
-      this.assertPageAllowed();
-      const send = this.requiredPage()
-        .getByRole('button', { name: /send|发送/i })
-        .or(this.requiredPage().locator(CHATGPT_SEND_SELECTOR))
-        .first();
-      if (await send.isVisible().catch(() => false)) await send.click();
-      else await composer.press('Enter');
-      this.assertPageAllowed();
-      return before;
+  private diagnostic(message: string) {
+    if (this.debug) console.error(`[DEBUG] ${message}`);
+  }
+}
+
+class OperationGuard {
+  private invalid = false;
+  private resolveInvalidation!: () => void;
+  private readonly invalidated: Promise<void>;
+  private readonly listener: (frame: Frame) => void;
+  constructor(
+    private readonly page: Page,
+    private readonly policy: OriginPolicy,
+  ) {
+    this.invalidated = new Promise((resolve) => {
+      this.resolveInvalidation = resolve;
     });
-  }
-  async waitForAssistantMessage(options: WaitOptions = {}): Promise<string> {
-    this.assertPageAllowed();
-    const after = options.afterCount ?? (await this.messages().count());
-    const timeout = options.timeoutMs ?? this.defaultTimeout;
-    this.diagnostic(`waiting for assistant index=${after}, timeout=${timeout}ms`);
-    const p = this.requiredPage();
-    const messages = this.messages();
-    try {
-      return await this.withOriginGuard(async () => {
-        await p.waitForFunction(
-          ({ selector, count }) => document.querySelectorAll(selector).length > count,
-          { selector: CHATGPT_ASSISTANT_SELECTOR, count: after },
-          { timeout },
-        );
-        const target = messages.nth(after);
-        await target.waitFor({ state: 'visible', timeout });
-        await p.waitForFunction(
-          ({ index, selector, streamingSelector, stopSelector }) => {
-            const items = document.querySelectorAll(selector);
-            const el = items[index];
-            if (!el) return false;
-            const streaming =
-              el.getAttribute('data-message-streaming') === 'true' ||
-              el.querySelector(streamingSelector);
-            const stop = document.querySelector(stopSelector);
-            return !streaming && !stop && (el.textContent?.trim().length ?? 0) > 0;
-          },
-          {
-            index: after,
-            selector: CHATGPT_ASSISTANT_SELECTOR,
-            streamingSelector: CHATGPT_STREAMING_SELECTOR,
-            stopSelector: CHATGPT_STOP_SELECTOR,
-          },
-          { timeout, polling: 100 },
-        );
-        const text = (await target.innerText()).trim();
-        this.diagnostic(`assistant response complete, characters=${text.length}`);
-        return text;
-      });
-    } catch (error) {
-      if (error instanceof ChatbridgeError && error.code === 'ORIGIN_DENIED') throw error;
-      if (error instanceof Error && error.message.includes('ORIGIN_DENIED'))
-        throw new ChatbridgeError('Page navigated outside the allowlisted origin', 'ORIGIN_DENIED');
-      throw new BridgeTimeoutError(
-        `Timed out after ${timeout}ms waiting for a complete assistant response: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-  private async withOriginGuard<T>(operation: () => Promise<T>): Promise<T> {
-    const page = this.requiredPage();
-    let rejectNavigation!: (reason: Error) => void;
-    const navigation = new Promise<never>((_, reject) => {
-      rejectNavigation = reject;
-    });
-    const listener = (frame: any) => {
-      if (frame === page.mainFrame() && !this.originPolicy.allows(frame.url()))
-        rejectNavigation(
-          new ChatbridgeError('Page navigated outside the allowlisted origin', 'ORIGIN_DENIED'),
-        );
+    this.listener = (frame) => {
+      if (frame === page.mainFrame() && !policy.allows(frame.url())) {
+        this.invalid = true;
+        this.resolveInvalidation();
+      }
     };
-    page.on('framenavigated', listener);
-    try {
-      return await Promise.race([operation(), navigation]);
-    } finally {
-      page.off('framenavigated', listener);
+    page.on('framenavigated', this.listener);
+  }
+  assertValid() {
+    if (this.invalid || !this.policy.allows(this.page.url())) {
+      this.invalid = true;
+      throw new ChatbridgeError('Page navigated outside the allowlisted origin', 'ORIGIN_DENIED');
     }
+  }
+  async run<T>(operation: () => Promise<T>) {
+    this.assertValid();
+    try {
+      const value = await operation();
+      this.assertValid();
+      return value;
+    } catch (error) {
+      this.assertValid();
+      throw error;
+    }
+  }
+  async delay(ms: number) {
+    this.assertValid();
+    await Promise.race([new Promise((resolve) => setTimeout(resolve, ms)), this.invalidated]);
+    this.assertValid();
+  }
+  dispose() {
+    this.page.off('framenavigated', this.listener);
   }
 }

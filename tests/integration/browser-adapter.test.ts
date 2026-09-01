@@ -23,6 +23,35 @@ async function connectedFixture() {
   await x.adapter.connect();
   return x;
 }
+async function adversarialFixture(chatBody: string) {
+  const isolated = await browser.newContext();
+  await isolated.route('https://chatgpt.com/**', (route) =>
+    route.fulfill({ contentType: 'text/html', body: chatBody }),
+  );
+  await isolated.route('https://example.test/**', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" onclick="foreignClicks++">Send</button><div id="foreign" data-message-author-role="assistant">secret</div><script>window.foreignClicks=0;window.foreignReads=0;const foreign=document.querySelector("#foreign");Object.defineProperty(foreign,"innerText",{get(){foreignReads++;return "secret"}})</script>',
+    }),
+  );
+  const page = await isolated.newPage();
+  await page.goto('https://chatgpt.com/c/adversarial');
+  const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1500, false, [
+    'https://chatgpt.com',
+  ]);
+  await adapter.connect();
+  return { isolated, page, adapter };
+}
+async function expectForeignUntouched(page: any) {
+  await page.waitForURL('https://example.test/**');
+  expect(
+    await page.evaluate(() => ({
+      composer: document.querySelector('#prompt-textarea')?.textContent,
+      clicks: (window as any).foreignClicks,
+      reads: (window as any).foreignReads,
+    })),
+  ).toEqual({ composer: '', clicks: 0, reads: 0 });
+}
 describe('ChatGPT adapter fixture', () => {
   it('reuses an existing ChatGPT tab without reading an unrelated tab DOM', async () => {
     const isolated = await browser.newContext();
@@ -148,5 +177,66 @@ describe('ChatGPT adapter fixture', () => {
     expect(Date.now() - started).toBeLessThan(1000);
     await navigation;
     await isolated.close();
+  });
+  it('cancels navigation during composer visibility wait before foreign fill', async () => {
+    const x = await adversarialFixture(
+      '<script>setTimeout(()=>location.href="https://example.test/composer-wait",60)</script>',
+    );
+    await expect(x.adapter.sendMessage('must-not-fill')).rejects.toMatchObject({
+      code: 'ORIGIN_DENIED',
+    });
+    await expectForeignUntouched(x.page);
+    await x.isolated.close();
+  });
+  it('invalidates immediately before fill when the selected document navigates', async () => {
+    const x = await adversarialFixture(
+      '<script>setTimeout(()=>{document.body.innerHTML=`<div id="prompt-textarea" role="textbox" contenteditable="true"></div>`;setTimeout(()=>location.href="https://example.test/before-fill",1)},40)</script>',
+    );
+    await expect(x.adapter.sendMessage('must-not-fill')).rejects.toMatchObject({
+      code: 'ORIGIN_DENIED',
+    });
+    await expectForeignUntouched(x.page);
+    await x.isolated.close();
+  });
+  it('uses a document-bound composer so navigation between fill and send cannot click foreign DOM', async () => {
+    const x = await adversarialFixture(
+      '<div id="prompt-textarea" role="textbox" contenteditable="true" oninput="location.href=`https://example.test/after-fill`"></div><button aria-label="Send prompt">Send</button>',
+    );
+    await expect(x.adapter.sendMessage('trigger-navigation')).rejects.toMatchObject({
+      code: 'ORIGIN_DENIED',
+    });
+    await expectForeignUntouched(x.page);
+    await x.isolated.close();
+  });
+  it('cancels while waiting for assistant creation without reading the foreign assistant', async () => {
+    const x = await adversarialFixture(
+      '<script>setTimeout(()=>location.href="https://example.test/assistant-creation",60)</script>',
+    );
+    await expect(
+      x.adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 1000 }),
+    ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
+    await expectForeignUntouched(x.page);
+    await x.isolated.close();
+  });
+  it('discards extraction when navigation occurs immediately before innerText', async () => {
+    const x = await adversarialFixture(
+      '<div id="answer" data-message-author-role="assistant">final</div>',
+    );
+    const adapter = new PlaywrightChatGPTWebAdapter(
+      x.isolated,
+      'https://chatgpt.com/',
+      1500,
+      false,
+      ['https://chatgpt.com'],
+      async () => {
+        await x.page.goto('https://example.test/before-inner-text');
+      },
+    );
+    await adapter.connect();
+    await expect(
+      adapter.waitForAssistantMessage({ afterCount: 0, timeoutMs: 1000 }),
+    ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
+    await expectForeignUntouched(x.page);
+    await x.isolated.close();
   });
 });

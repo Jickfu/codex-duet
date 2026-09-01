@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { attachBrowser, type BrowserDetection } from '../../src/browser/browser-manager.js';
 import { loadConfig } from '../../src/config/config.js';
 import type { RuntimeSelection } from '../../src/browser/connection-types.js';
+import { ChatbridgeError } from '../../src/core/errors.js';
 
 function harness(success: (args: readonly string[]) => boolean) {
   let value: RuntimeSelection | undefined;
@@ -84,6 +85,50 @@ describe('native existing-session selection', () => {
         h.store,
       ),
     ).rejects.toMatchObject({ code: 'EXTENSION_UNAVAILABLE' });
+    expect(h.detection.installed).not.toHaveBeenCalled();
+  });
+  it('does not fallback after Extension attached but ChatGPT validation failed', async () => {
+    let attached = false;
+    const h = harness(() => false);
+    h.runner.run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes('--extension=chrome')) {
+        attached = true;
+        return { stdout: 'attached', stderr: '' };
+      }
+      if (args.includes('run-code') && attached)
+        throw new ChatbridgeError('adapter regression', 'CLI_RESULT_MISSING');
+      if (args.includes('detach')) return { stdout: 'detached', stderr: '' };
+      throw new Error('unavailable');
+    });
+    await expect(
+      attachBrowser(
+        loadConfig(),
+        { browser: 'auto', transport: 'auto' },
+        h.runner,
+        h.detection,
+        h.store,
+      ),
+    ).rejects.toMatchObject({ code: 'CLI_RESULT_MISSING' });
+    expect(h.runner.run.mock.calls.flat().join(' ')).not.toContain('--cdp=');
+  });
+  it('does not fallback to managed after channel CDP attached but validation failed', async () => {
+    const h = harness(() => false);
+    h.runner.run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes('--cdp=chrome')) return { stdout: 'attached', stderr: '' };
+      if (args.includes('run-code'))
+        throw new ChatbridgeError('session validation failed', 'PLAYWRIGHT_CLI_FAILED');
+      if (args.includes('detach')) return { stdout: 'detached', stderr: '' };
+      throw new Error('unavailable');
+    });
+    await expect(
+      attachBrowser(
+        loadConfig(),
+        { browser: 'chrome', transport: 'auto' },
+        h.runner,
+        h.detection,
+        h.store,
+      ),
+    ).rejects.toMatchObject({ code: 'PLAYWRIGHT_CLI_FAILED' });
     expect(h.detection.installed).not.toHaveBeenCalled();
   });
   it('retains explicit raw CDP endpoint', async () => {

@@ -39,18 +39,29 @@ export async function doctor(options: { endpoint?: string } = {}) {
               : bundled
                 ? 'bundled'
                 : 'unavailable';
-  console.log(`Extension Chrome: ${chromeExtension ? 'available' : 'unavailable'}`);
-  console.log(`Extension Edge: ${edgeExtension ? 'available' : 'unavailable'}`);
-  console.log(`Channel CDP Chrome: ${chromeChannel ? 'attachable' : 'not authorized'}`);
-  console.log(`Channel CDP Edge: ${edgeChannel ? 'attachable' : 'not authorized'}`);
+  console.log(
+    `Extension Chrome: ${chromeExtension ? 'available (session not validated)' : 'unavailable'}`,
+  );
+  console.log(
+    `Extension Edge: ${edgeExtension ? 'available (session not validated)' : 'unavailable'}`,
+  );
+  console.log(
+    `Channel CDP Chrome: ${chromeChannel ? 'authorized (session not validated)' : 'not authorized'}`,
+  );
+  console.log(
+    `Channel CDP Edge: ${edgeChannel ? 'authorized (session not validated)' : 'not authorized'}`,
+  );
   console.log(
     `Raw CDP endpoint: ${options.endpoint ? `${options.endpoint} ${raw ? 'reachable' : 'unreachable'}` : 'not specified'}`,
   );
-  console.log(`Managed Chrome installed: ${chromeInstalled ? 'yes' : 'no'}`);
-  console.log(`Managed Edge installed: ${edgeInstalled ? 'yes' : 'no'}`);
+  console.log(`Managed Chrome: ${chromeInstalled ? 'installed' : 'missing'}`);
+  console.log(`Managed Edge: ${edgeInstalled ? 'installed' : 'missing'}`);
   console.log(`Bundled Chromium: ${bundled ? 'installed' : 'not installed'}`);
-  console.log(`Selected mode: ${runtime?.mode ?? 'none'}`);
-  console.log(`Recommended mode: ${recommended}`);
+  console.log(`Selected runtime: ${runtime?.mode ?? 'none'}`);
+  console.log(`Recommended runtime: ${recommended}`);
+  console.log(
+    `ChatGPT session: ${runtime ? 'not tested (run status or attach for validation)' : 'not tested'}`,
+  );
   console.log(
     'Installed-browser detection uses a short official Playwright channel launch probe; it closes the temporary browser and profile immediately.',
   );

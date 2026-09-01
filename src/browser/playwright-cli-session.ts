@@ -45,7 +45,7 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
         ).value,
       );
     } catch (error) {
-      if (error instanceof ChatbridgeError && error.code === 'PLAYWRIGHT_CLI_FAILED')
+      if (error instanceof ChatbridgeError && error.code === 'PLAYWRIGHT_CLI_TIMEOUT')
         throw new BridgeTimeoutError(`Timed out waiting for a complete assistant response`);
       throw error;
     }

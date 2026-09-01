@@ -154,6 +154,10 @@ async function tryCliAttach(
 ) {
   try {
     await runner.run([`--session=${session}`, 'attach', argument], 5000);
+  } catch {
+    return false;
+  }
+  try {
     await new PlaywrightCliChatGPTSession(
       runner,
       session,
@@ -162,9 +166,9 @@ async function tryCliAttach(
       config.timeoutMs,
     ).ensureConversation();
     return true;
-  } catch {
+  } catch (error) {
     await runner.run([`--session=${session}`, 'detach'], 3000).catch(() => undefined);
-    return false;
+    throw error;
   }
 }
 function sessionName() {

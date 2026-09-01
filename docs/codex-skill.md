@@ -59,7 +59,7 @@ The real M3.2a multiple-tab acceptance completed with task `m3-conversation-bind
 - M3 overall: **IN PROGRESS**.
 - M3.1 Automatic Multi-Round Review/Fix Loop: **Frozen / Desktop E2E PASS**.
 - M3.2a Task ↔ ChatGPT Conversation Binding: **Frozen / Desktop E2E PASS**.
-- M3.2b `EXECUTING` Crash Reconciliation: **NEXT**.
+- M3.2b `EXECUTING` Crash Reconciliation: **DESIGN FROZEN / IMPLEMENTATION NEXT**.
 - M3.2c Resume / Browser UX Hardening: **PLANNED**.
 
 M3.1 builds on the frozen single-round contract. One task keeps one branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` continues automatically under the current Codex Desktop Executor, subject to deterministic guards and a configurable iteration limit. M3.1 does not add a Node agent loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
@@ -83,3 +83,9 @@ New tasks default to eight iterations. `chatbridge duet init --max-iterations <n
 The first task-aware send remains fail-closed: without an existing binding or explicit validated `--conversation-url`, multiple eligible ChatGPT tabs still return `CHATGPT_TAB_AMBIGUOUS`. A missing bound tab is reopened only at the exact allowlisted URL; failure returns `CHATGPT_CONVERSATION_UNAVAILABLE`, never an automatic rebind. Unscoped `send` and `wait` retain Frozen M1 behavior and `.chatbridge/session.json` compatibility.
 
 Planner and Reviewer traffic in the repository Skill uses `send --task <taskId>` and `wait --task <taskId> --parse`. A confirmed send plus wait timeout permits only another task-aware wait; it never permits replay. Real Desktop multiple-tab acceptance passed with explicit C1 bootstrap while unrelated C2/C3 remained open, task-bound Planner wait, and exact C1 reopen for both review send and Reviewer wait after manual tab closure. The binding and original `boundAt` stayed stable, task-scoped pending send was replaced only after confirmed send, and the legacy global SessionStore remained isolated. Private conversation and message identifiers remain only in local gitignored evidence. `EXECUTING` crash reconciliation is next in M3.2b, and explicit rebind/cleanup/recovery UX remains deferred to M3.2c.
+
+## M3.2b planned EXECUTING resume
+
+[ADR-014](adr/ADR-014-executing-crash-reconciliation.md) freezes local deterministic reconciliation without adding a C2C state or another Executor. A future Skill resume at `EXECUTING` will invoke `duet reconcile-execution --task <taskId>` and follow its evidence-backed action: resume the same plan from a Git-clean baseline, preserve and continue an in-progress worktree, obtain honest exact-HEAD test evidence for committed work, proceed directly to prepare review when evidence is current, or use normal `EXECUTED` resume after conclusive Frozen M2 adoption.
+
+Recovery is resume, never blind replay. The Skill must not reset, clean, stash, discard edits, recreate existing commits, infer PASS, repush already prepared M2 work, start another Codex, or claim exactly-once safety for arbitrary external commands. The planned `duet record-tests --task <taskId> --status PASS|FAIL|NOT_RUN` binds durable test evidence to the current clean task-branch `HEAD`; a later commit makes it stale. These commands and behaviors are design-only until M3.2b implementation lands.

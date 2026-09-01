@@ -70,3 +70,9 @@ BASE_REF..REVIEW_REF
 Both values are immutable full 40-character commit SHAs. Branches, tags, `HEAD`, remote-tracking names, short SHAs, and other moving refs are forbidden as formal review identities. After push, the remote task-branch SHA must equal the local `REVIEW_REF`.
 
 The Frozen M2 implementation supplies task/ref safety, verified push, persistence, CLI commands, and compact review-envelope primitives. See [the M2 milestone](milestones/M2-github-mode.md) and [ADR-008](adr/ADR-008-immutable-github-review-range.md).
+
+## M3.2b crash-reconciliation boundary
+
+M3.2b is design-frozen but not implemented. It may inspect local branch, full `HEAD`, ancestry, worktree/conflict metadata, iteration execution evidence, and existing Frozen M2 status. It does not duplicate or replay M2 push, remote-SHA verification, review-ref creation, or branch-safety logic.
+
+If Frozen M2 conclusively finished the current iteration before M3 persisted `EXECUTED`, reconciliation may adopt the durable `GitHubReviewTarget` and reconstruct the deterministic review envelope without repushing. Adoption requires matching repository and task branch, clean conflict-free worktree, `HEAD == M2.reviewRef`, execution-base ancestry, test status, and multi-round review monotonicity. A stale prior-iteration review ref or a local `HEAD` advanced beyond M2 evidence is not adoptable and fails closed. See [ADR-014](adr/ADR-014-executing-crash-reconciliation.md).

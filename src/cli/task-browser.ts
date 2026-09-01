@@ -71,6 +71,12 @@ export async function taskAwareSend(
           'CHATGPT_CONVERSATION_UNAVAILABLE',
         );
       await reservations.assertAvailable(taskId, selected, Boolean(existing || explicit));
+      const pinned = await connected.adapter.connect({ conversationUrl: selected });
+      if (urls.canonicalize(pinned.conversationUrl) !== selected)
+        throw new ChatbridgeError(
+          'Browser could not pin the selected ChatGPT conversation',
+          'CHATGPT_CONVERSATION_UNAVAILABLE',
+        );
       if (!(await connected.adapter.isLoggedIn()))
         throw new Error(
           'ChatGPT is not logged in. Run `chatbridge browser open`, log in manually, then retry.',

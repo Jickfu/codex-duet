@@ -18,6 +18,7 @@ interface SendPreparation {
 
 export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
   private selectedConversationUrl?: string;
+  private strictConversationTarget = false;
   private readonly conversationUrls: ConversationUrlPolicy;
   constructor(
     private readonly runner: PlaywrightCliRunnerLike,
@@ -38,6 +39,7 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
     });
     const selection = result.value as { conversationUrl: string };
     this.selectedConversationUrl = this.conversationUrls.canonicalize(selection.conversationUrl);
+    this.strictConversationTarget = Boolean(target);
     return { conversationUrl: this.selectedConversationUrl };
   }
   async ensureConversation() {
@@ -116,6 +118,7 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
         {
           kind: 'recover',
           conversationUrl: prepared.conversationUrl,
+          exactOnly: this.strictConversationTarget,
           ...(prepared.previousUserMessageId
             ? { previousUserMessageId: prepared.previousUserMessageId }
             : {}),

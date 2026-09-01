@@ -22,6 +22,7 @@ export type CliOperation =
   | {
       kind: 'recover';
       conversationUrl: string;
+      exactOnly?: boolean;
       previousUserMessageId?: string;
       previousAssistantMessageId?: string;
     }
@@ -91,6 +92,7 @@ export function buildCliOperation(
       if(c.operation.kind==='recover'){
         const inspected=[];
         const inspect=async candidate=>{if(inspected.includes(candidate))return;inspected.push(candidate);let candidateInvalid=false;let invalidate;const invalidated=new Promise(resolve=>invalidate=resolve);const listener=frame=>{if(frame===candidate.mainFrame()&&!allowed(frame.url())){candidateInvalid=true;invalidate()}};const check=()=>{if(candidateInvalid||!allowed(candidate.url())){candidateInvalid=true;fail('ORIGIN_DENIED')}};const candidateStep=async action=>{check();try{const value=await action();check();return value}catch(error){await Promise.race([delay(25),invalidated]);check();throw error}};candidate.on('framenavigated',listener);try{check();const items=await metadata(candidate,candidateStep);check();const id=latest(items,'user');return id&&id!==c.operation.previousUserMessageId?{conversationUrl:candidate.url(),outgoingUserMessageId:id,previousAssistantMessageId:c.operation.previousAssistantMessageId}:undefined}finally{candidate.off('framenavigated',listener)}};
+        if(c.operation.exactOnly){const old=exact(c.operation.conversationUrl);return result({value:old?(await inspect(old)||null):null})}
         const preferred=allowed(page.url())?await inspect(page):undefined;if(preferred)return result({value:preferred});
         const old=exact(c.operation.conversationUrl);if(old){const recovered=await inspect(old);if(recovered)return result({value:recovered})}
         const matches=[];for(const candidate of candidates()){const recovered=await inspect(candidate);if(recovered)matches.push(recovered)}

@@ -211,6 +211,88 @@ describe('Playwright CLI transport', () => {
       run.mock.calls.filter(([args]) => String(args[2]).includes('"kind":"commit"')),
     ).toHaveLength(1);
   });
+  it('enables exact-only recovery after an explicit target pin', async () => {
+    const target = 'https://chatgpt.com/c/task';
+    const sources: string[] = [];
+    const run = vi.fn(async (args: readonly string[]) => {
+      const source = String(args[2]);
+      sources.push(source);
+      const kind = source.match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit') throw new ChatbridgeError('timeout', 'PLAYWRIGHT_CLI_TIMEOUT');
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'ensure'
+              ? { conversationUrl: target }
+              : kind === 'prepare'
+                ? { conversationUrl: target, previousUserMessageId: 'old' }
+                : { conversationUrl: target, outgoingUserMessageId: 'new' },
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'strict', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await session.connect({ conversationUrl: target });
+    await session.sendMessage('once');
+    const recovery = sources.find((source) => source.includes('"kind":"recover"'))!;
+    expect(recovery).toContain('"exactOnly":true');
+  });
+  it('maps a missing exact recovery target to SEND_OUTCOME_UNKNOWN', async () => {
+    const target = 'https://chatgpt.com/c/missing';
+    const run = vi.fn(async (args: readonly string[]) => {
+      const source = String(args[2]);
+      const kind = source.match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit') throw new ChatbridgeError('timeout', 'PLAYWRIGHT_CLI_TIMEOUT');
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'ensure'
+              ? { conversationUrl: target }
+              : kind === 'prepare'
+                ? { conversationUrl: target, previousUserMessageId: 'old' }
+                : null,
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'missing', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await session.connect({ conversationUrl: target });
+    await expect(session.sendMessage('once')).rejects.toMatchObject({
+      code: 'SEND_OUTCOME_UNKNOWN',
+    });
+  });
+  it('keeps recovery broad after an unscoped legacy connect', async () => {
+    const target = 'https://chatgpt.com/c/current';
+    const sources: string[] = [];
+    const run = vi.fn(async (args: readonly string[]) => {
+      const source = String(args[2]);
+      sources.push(source);
+      const kind = source.match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit') throw new ChatbridgeError('timeout', 'PLAYWRIGHT_CLI_TIMEOUT');
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'ensure'
+              ? { conversationUrl: target }
+              : kind === 'prepare'
+                ? { conversationUrl: target, previousUserMessageId: 'old' }
+                : { conversationUrl: target, outgoingUserMessageId: 'new' },
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'legacy', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await session.connect();
+    await session.sendMessage('once');
+    const recovery = sources.find((source) => source.includes('"kind":"recover"'))!;
+    expect(recovery).toContain('"exactOnly":false');
+  });
   it('reports an unknown send outcome when timeout recovery finds no new user identity', async () => {
     const run = vi.fn(async (args: readonly string[]) => {
       const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
@@ -559,6 +641,64 @@ describe('Playwright CLI transport', () => {
     expect(decodedOutput(await operation(foreign))).toMatchObject({
       value: { outgoingUserMessageId: 'new-user' },
     });
+  });
+  it('recovers only from the exact task target when the current tab is another conversation', async () => {
+    const element = (id: string) => ({
+      getAttribute: async (name: string) =>
+        name === 'data-message-id' ? id : name === 'data-message-author-role' ? 'user' : null,
+    });
+    const candidate = (url: string, id: string): any => ({
+      url: () => url,
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: vi.fn(async () => [element(id)]),
+    });
+    const exact = candidate('https://chatgpt.com/c/one', 'user-one');
+    const current = candidate('https://chatgpt.com/c/two', 'user-two');
+    current.context = () => ({ pages: () => [current, exact] });
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'recover',
+          conversationUrl: exact.url(),
+          exactOnly: true,
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'strict-target',
+      ),
+      current,
+    );
+    expect(decodedOutput(output)).toMatchObject({
+      value: { conversationUrl: exact.url(), outgoingUserMessageId: 'user-one' },
+    });
+    expect(exact.$$).toHaveBeenCalledOnce();
+    expect(current.$$).not.toHaveBeenCalled();
+  });
+  it('returns no recovery marker when the exact task target is missing', async () => {
+    const current: any = {
+      url: () => 'https://chatgpt.com/c/two',
+      $$: vi.fn(async () => []),
+    };
+    current.context = () => ({ pages: () => [current] });
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'recover',
+          conversationUrl: 'https://chatgpt.com/c/missing',
+          exactOnly: true,
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'strict-missing',
+      ),
+      current,
+    );
+    expect(decodedOutput(output)).toEqual({ value: null });
+    expect(current.$$).not.toHaveBeenCalled();
   });
   it('fails before click when existing message identity capability is unavailable', async () => {
     let clicks = 0;

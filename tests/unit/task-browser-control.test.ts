@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserAutomationSession } from '../../src/browser/browser-automation-session.js';
 import { ConversationBindingLock } from '../../src/browser/conversation-binding-lock.js';
+import { ConversationReservationService } from '../../src/browser/conversation-reservation.js';
 import { TaskBrowserStore } from '../../src/browser/task-browser-store.js';
 import { BridgeTimeoutError, ChatbridgeError } from '../../src/core/errors.js';
 import { DuetRunStore } from '../../src/duet/run-store.js';
@@ -75,7 +76,9 @@ async function fixture(
   });
   const connects: Array<string | undefined> = [];
   const adapter = {
-    connect: vi.fn(),
+    connect: vi.fn(async (options = {}) => ({
+      conversationUrl: options.conversationUrl ?? selected,
+    })),
     ensureConversation: vi.fn(),
     isLoggedIn: vi.fn(async () => true),
     sendMessage: sends,
@@ -98,7 +101,7 @@ async function fixture(
     },
     now: () => new Date(1).toISOString(),
   };
-  return { stateRoot, runs, store, sends, waits, connects, dependencies };
+  return { stateRoot, runs, store, sends, waits, connects, adapter, dependencies };
 }
 
 afterEach(async () =>
@@ -123,6 +126,29 @@ describe('task-aware Browser control', () => {
     await writeFile(legacy, '{"legacy":true}', 'utf8');
     await taskAwareSend('message', 'task-a', 'https://chatgpt.com/c/shared', x.dependencies);
     expect(await readFile(legacy, 'utf8')).toBe('{"legacy":true}');
+  });
+
+  it('re-pins an unbound discovery after reservation and cannot persist another current tab', async () => {
+    const x = await fixture('https://chatgpt.com/c/one');
+    await x.runs.write(run('task-a'));
+    const reservation = vi.spyOn(ConversationReservationService.prototype, 'assertAvailable');
+    await taskAwareSend('message', 'task-a', undefined, x.dependencies);
+    expect(x.connects).toEqual([undefined]);
+    expect(x.sends).toHaveBeenCalledOnce();
+    expect(x.adapter.connect).toHaveBeenCalledWith({
+      conversationUrl: 'https://chatgpt.com/c/one',
+    });
+    expect(reservation.mock.invocationCallOrder[0]).toBeLessThan(
+      x.adapter.connect.mock.invocationCallOrder[0]!,
+    );
+    expect(x.adapter.connect.mock.invocationCallOrder[0]).toBeLessThan(
+      x.adapter.isLoggedIn.mock.invocationCallOrder[0]!,
+    );
+    expect(x.adapter.isLoggedIn.mock.invocationCallOrder[0]).toBeLessThan(
+      x.sends.mock.invocationCallOrder[0]!,
+    );
+    expect((await x.store.read('task-a'))?.conversation.url).toBe('https://chatgpt.com/c/one');
+    expect((await x.store.read('task-a'))?.conversation.url).not.toBe('https://chatgpt.com/c/two');
   });
 
   it('serializes concurrent bootstrap and rejects the loser before send', async () => {

@@ -23,3 +23,25 @@ INIT -> PLANNING -> PLAN -> EXECUTING -> EXECUTED -> REVIEWING
 ```
 
 Terminal states have no outgoing transitions. In particular, `DONE -> EXECUTING` is invalid. `BLOCKED` may resume into the phase that can make progress. Parsers validate syntax; the state machine separately validates lifecycle transitions.
+
+## GitHub mode review envelope
+
+An `EXECUTED` GitHub message adds `MODE`, `REPOSITORY`, `TASK_BRANCH`, `BASE_REF`, `REVIEW_REF`, and `TEST_STATUS`. Both refs must be lowercase full 40-character SHAs; moving refs and short SHAs are rejected. These mode-specific requirements are enforced by the central protocol schema. A `PLAN` message does not require a review ref.
+
+```text
+[C2C/1]
+TASK: demo
+ITERATION: 1
+STATE: EXECUTED
+MODE: GITHUB
+REPOSITORY: owner/repository
+TASK_BRANCH: agent/task-demo
+BASE_REF: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+REVIEW_REF: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+TEST_STATUS: PASS
+
+EXECUTED:
+Review the implementation using the GitHub data plane.
+Review exactly BASE_REF..REVIEW_REF.
+Do not review a moving branch head.
+```

@@ -9,13 +9,18 @@ describe('task checkpoint', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'codex-duet-'));
     const store = new TaskCheckpointStore(root);
     const checkpoint = {
+      version: 1 as const,
       taskId: '01JTEST',
       mode: 'GITHUB' as const,
       iteration: 2,
       state: 'EXECUTED' as const,
       conversationRef: 'conversation-1',
+      repository: 'owner/repository',
+      remote: 'origin',
+      taskBranch: 'agent/task-01JTEST',
       baseRef: 'a'.repeat(40),
       reviewRef: 'b'.repeat(40),
+      testStatus: 'PASS' as const,
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(1).toISOString(),
     };

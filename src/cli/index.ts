@@ -8,6 +8,8 @@ import { wait } from './wait.js';
 import { status } from './status.js';
 import { doctor } from './doctor.js';
 import { detach } from './detach.js';
+import { ChatbridgeError } from '../core/errors.js';
+import { githubDoctor, githubInitTask, githubPrepareReview, githubStatus } from './github.js';
 const program = new Command()
   .name('chatbridge')
   .description('Deterministic ChatGPT Web browser bridge')
@@ -50,6 +52,32 @@ browser
   .command('detach')
   .description('Detach without closing an existing user browser')
   .action(detach);
+const github = program.command('github').description('Manage the GitHub code/data plane');
+github
+  .command('doctor')
+  .description('Validate Git and GitHub repository prerequisites without mutation')
+  .option('--task <id>', 'include durable task metadata')
+  .action((o: { task?: string }) => githubDoctor(o.task));
+github
+  .command('init-task')
+  .description('Create or recover one safe task branch')
+  .requiredOption('--task <id>')
+  .action((o: { task: string }) => githubInitTask(o.task));
+github
+  .command('status')
+  .description('Read durable GitHub task state')
+  .requiredOption('--task <id>')
+  .action((o: { task: string }) => githubStatus(o.task));
+github
+  .command('prepare-review')
+  .description('Push and verify the immutable GitHub review target')
+  .requiredOption('--task <id>')
+  .addOption(
+    new Option('--tests <status>').choices(['PASS', 'FAIL', 'NOT_RUN']).makeOptionMandatory(),
+  )
+  .action((o: { task: string; tests: 'PASS' | 'FAIL' | 'NOT_RUN' }) =>
+    githubPrepareReview(o.task, o.tests),
+  );
 program
   .command('send')
   .requiredOption('--message-file <path>')
@@ -61,6 +89,12 @@ program
   .action((o: { parse?: boolean; timeout?: number }) => wait(Boolean(o.parse), o.timeout));
 program.command('status').action(status);
 program.parseAsync().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(
+    error instanceof ChatbridgeError
+      ? `${error.code}: ${error.message}`
+      : error instanceof Error
+        ? error.message
+        : String(error),
+  );
   process.exitCode = 1;
 });

@@ -44,8 +44,8 @@ export class TaskCheckpointStore {
   constructor(private readonly root: string) {}
 
   private pathFor(taskId: string) {
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(taskId))
-      throw new Error('Invalid task ID for checkpoint path');
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(taskId))
+      throw new ChatbridgeError('Invalid task ID for checkpoint path', 'INVALID_TASK_ID');
     return path.join(this.root, 'tasks', `${taskId}.json`);
   }
 

@@ -6,7 +6,7 @@
 
 ChatGPT Web is the planner, architect, and reviewer. Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries control messages without feeding screenshots, DOM snapshots, chat history, or polling loops into the model context.
 
-This release implements through **M1.2 Native Existing Session** only. GitHub automation, Local MCP, cloudflared, and the durable orchestrator are deliberately not implemented.
+This release implements the **M2 GitHub Mode MVP** data plane. Local MCP, cloudflared, PR automation, and the durable orchestrator are deliberately not implemented.
 
 ## Install
 
@@ -61,6 +61,20 @@ chatbridge status
 
 `wait` performs deterministic DOM waiting internally and prints only the final assistant message. `--parse` rejects malformed C2C/1 and emits validated JSON. It times out rather than returning an incomplete streaming response.
 
+## GitHub Mode
+
+GitHub Mode creates one safe `agent/task-<taskId>` branch per task and produces an immutable full-SHA review range after a verified push:
+
+```text
+chatbridge github doctor
+chatbridge github init-task --task demo
+# edit, test, and commit
+chatbridge github prepare-review --task demo --tests PASS
+chatbridge github status --task demo
+```
+
+The worktree must be clean at initialization and review preparation. The tool never stashes, resets, cleans, force-pushes, or modifies the default branch. See [M2 GitHub Mode](docs/milestones/M2-github-mode.md).
+
 ## Security and limitations
 
 - Browser automation uses the public ChatGPT UI and official Playwright APIs, never private or reverse-engineered APIs.
@@ -69,6 +83,6 @@ chatbridge status
 - M1.2 supports one selected runtime and one outstanding send checkpoint per project.
 - ChatGPT UI changes can require updates to the centralized adapter selectors.
 - Real ChatGPT E2E is manual; CI fixtures are local and require no account.
-- LOCAL read-only MCP and GITHUB data-plane workflows are architecture-only until later milestones.
+- LOCAL read-only MCP remains architecture-only until a later milestone.
 
 See [architecture](docs/architecture.md), [protocol](docs/protocol.md), [security](docs/security.md), and the [Browser Bridge](docs/browser-bridge.md).

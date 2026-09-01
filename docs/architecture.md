@@ -54,7 +54,7 @@ See [Data planes](data-plane.md), [GITHUB mode](github-mode.md), and [LOCAL mode
 flowchart TB
     O[Codex Desktop / Skill<br/>FROZEN M3.0/M3.1]
     O --> B[Browser Control<br/>FROZEN M1]
-    O --> T[Task Conversation Binding<br/>M3.2a DESIGN FROZEN]
+    O --> T[Task Conversation Binding<br/>M3.2a IMPLEMENTED]
     T --> B
     O --> C[CodeProvider]
     C --> L[LocalCodeProvider<br/>PLANNED M4]
@@ -69,19 +69,19 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 
 ## Current and planned status
 
-| Component                                          | Status                      |
-| -------------------------------------------------- | --------------------------- |
-| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0** |
-| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1** |
-| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2** |
-| Codex Skill and single-round durable orchestration | **FROZEN M3.0**             |
-| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**  |
-| Task-scoped ChatGPT conversation binding           | **M3.2a DESIGN FROZEN**     |
-| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**              |
-| `submit_response` MCP return path                  | **PLANNED M4**              |
-| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**          |
-| cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**              |
-| Hardening, packaging, and distribution             | **PLANNED M6**              |
+| Component                                          | Status                          |
+| -------------------------------------------------- | ------------------------------- |
+| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0**     |
+| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1**     |
+| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2**     |
+| Codex Skill and single-round durable orchestration | **FROZEN M3.0**                 |
+| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**      |
+| Task-scoped ChatGPT conversation binding           | **M3.2a COMPLETE / E2E MANUAL** |
+| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                  |
+| `submit_response` MCP return path                  | **PLANNED M4**                  |
+| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**              |
+| cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**                  |
+| Hardening, packaging, and distribution             | **PLANNED M6**                  |
 
 M3 can first complete the loop in GITHUB mode. A complete LOCAL loop depends on M4 and M5.
 

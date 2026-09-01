@@ -126,12 +126,21 @@ duet
 program
   .command('send')
   .requiredOption('--message-file <path>')
-  .action((o: { messageFile: string }) => send(o.messageFile));
+  .option('--task <id>', 'use task-scoped Browser binding')
+  .option('--conversation-url <url>', 'explicit conversation bootstrap target')
+  .action((o: { messageFile: string; task?: string; conversationUrl?: string }) => {
+    if (o.conversationUrl && !o.task)
+      throw new ChatbridgeError('--conversation-url requires --task', 'TASK_REQUIRED');
+    return send(o.messageFile, o.task, o.conversationUrl);
+  });
 program
   .command('wait')
   .option('--parse', 'parse and validate C2C/1')
   .option('--timeout <ms>', 'timeout in milliseconds', Number)
-  .action((o: { parse?: boolean; timeout?: number }) => wait(Boolean(o.parse), o.timeout));
+  .option('--task <id>', 'use task-scoped Browser binding')
+  .action((o: { parse?: boolean; timeout?: number; task?: string }) =>
+    wait(Boolean(o.parse), o.timeout, o.task),
+  );
 program.command('status').action(status);
 program.parseAsync().catch((error: unknown) => {
   console.error(

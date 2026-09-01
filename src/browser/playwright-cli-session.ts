@@ -2,11 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { BridgeTimeoutError, ChatbridgeError } from '../core/errors.js';
 import type {
   BrowserAutomationSession,
+  BrowserConnectOptions,
   SendMarker,
   WaitOptions,
 } from './browser-automation-session.js';
 import { buildCliOperation, type CliOperation } from './chatgpt-rules.js';
 import type { PlaywrightCliRunnerLike } from './playwright-cli-runner.js';
+import { ConversationUrlPolicy } from './conversation-url.js';
 
 interface SendPreparation {
   conversationUrl: string;
@@ -15,25 +17,57 @@ interface SendPreparation {
 }
 
 export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
+  private selectedConversationUrl?: string;
+  private readonly conversationUrls: ConversationUrlPolicy;
   constructor(
     private readonly runner: PlaywrightCliRunnerLike,
     private readonly session: string,
     private readonly url: string,
     private readonly origins: readonly string[],
     private readonly timeoutMs = 120_000,
-  ) {}
-  async connect() {
-    await this.ensureConversation();
+  ) {
+    this.conversationUrls = new ConversationUrlPolicy(origins);
+  }
+  async connect(options: BrowserConnectOptions = {}) {
+    const target = options.conversationUrl
+      ? this.conversationUrls.canonicalize(options.conversationUrl)
+      : undefined;
+    const result = await this.operation({
+      kind: 'ensure',
+      ...(target ? { conversationUrl: target } : {}),
+    });
+    const selection = result.value as { conversationUrl: string };
+    this.selectedConversationUrl = this.conversationUrls.canonicalize(selection.conversationUrl);
+    return { conversationUrl: this.selectedConversationUrl };
   }
   async ensureConversation() {
-    await this.operation({ kind: 'ensure' });
+    const result = await this.operation({
+      kind: 'ensure',
+      ...(this.selectedConversationUrl ? { conversationUrl: this.selectedConversationUrl } : {}),
+    });
+    const selection = result.value as { conversationUrl?: string } | undefined;
+    if (selection?.conversationUrl) this.selectedConversationUrl = selection.conversationUrl;
   }
   async isLoggedIn() {
-    return Boolean((await this.operation({ kind: 'login' })).value);
+    return Boolean(
+      (
+        await this.operation({
+          kind: 'login',
+          ...(this.selectedConversationUrl
+            ? { conversationUrl: this.selectedConversationUrl }
+            : {}),
+        })
+      ).value,
+    );
   }
   async sendMessage(message: string): Promise<SendMarker> {
     if (!message.trim()) throw new ChatbridgeError('Message must not be empty', 'EMPTY_MESSAGE');
-    const prepared = (await this.operation({ kind: 'prepare' })).value as SendPreparation;
+    const prepared = (
+      await this.operation({
+        kind: 'prepare',
+        ...(this.selectedConversationUrl ? { conversationUrl: this.selectedConversationUrl } : {}),
+      })
+    ).value as SendPreparation;
     const commit: CliOperation = { kind: 'commit', message, ...prepared };
     try {
       return (await this.operation(commit, 30_000, 'send')).value as SendMarker;
@@ -155,6 +189,7 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
       CHATGPT_MESSAGE_ID_UNAVAILABLE: 'ChatGPT did not expose a stable message identity',
       CHATGPT_TAB_AMBIGUOUS: 'Multiple ChatGPT tabs are available and no current tab is defined',
       CHATGPT_CONVERSATION_NOT_FOUND: 'The checkpoint conversation tab is not available',
+      CHATGPT_CONVERSATION_UNAVAILABLE: 'The bound ChatGPT conversation is unavailable',
       SEND_OBSERVER_FAILED: 'Send was attempted but its outgoing message identity was not observed',
     };
     if (code === 'BRIDGE_TIMEOUT') throw new BridgeTimeoutError('Browser operation timed out');

@@ -37,6 +37,92 @@ const executeRestricted = (code: string, page: unknown, globals: Record<string, 
   return operation(page);
 };
 describe('Playwright CLI transport', () => {
+  it('reuses the connect-selected exact URL for login, prepare, and commit', async () => {
+    const target = 'https://chatgpt.com/c/bound';
+    const operations: string[] = [];
+    const run = vi.fn(async (args: readonly string[]) => {
+      const source = String(args[2]);
+      const kind = source.match(/"kind":"([^"]+)"/)?.[1] ?? '';
+      operations.push(source);
+      const value =
+        kind === 'ensure'
+          ? { conversationUrl: target }
+          : kind === 'login'
+            ? true
+            : kind === 'prepare'
+              ? { conversationUrl: target, previousUserMessageId: 'old' }
+              : { conversationUrl: target, outgoingUserMessageId: 'new' };
+      return { stdout: encoded(args, { value }), stderr: '' };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'stable', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    expect(await session.connect({ conversationUrl: target })).toEqual({ conversationUrl: target });
+    expect(await session.isLoggedIn()).toBe(true);
+    await session.sendMessage('message');
+    for (const source of operations) expect(source).toContain(`"conversationUrl":"${target}"`);
+  });
+  it('exact-target connect bypasses global ambiguity and opens only the requested URL', async () => {
+    const targetUrl = 'https://chatgpt.com/c/target';
+    const other = (url: string): any => ({ url: () => url });
+    const target = other(targetUrl);
+    target.mainFrame = () => ({});
+    target.on = vi.fn();
+    target.off = vi.fn();
+    const supplied: any = other('https://example.test/');
+    supplied.context = () => ({
+      pages: () => [
+        other('https://chatgpt.com/c/one'),
+        target,
+        other('https://chatgpt.com/c/three'),
+        supplied,
+      ],
+    });
+    const output = await new Function(
+      `return (${buildCliOperation(
+        { kind: 'ensure', conversationUrl: targetUrl },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'exact',
+      )})`,
+    )()(supplied);
+    expect(decodedOutput(output)).toEqual({ value: { conversationUrl: targetUrl } });
+  });
+  it('exact-target connect opens a missing URL and rejects identity-changing navigation', async () => {
+    let current = 'about:blank';
+    const created: any = {
+      url: () => current,
+      goto: vi.fn(async (url: string) => {
+        current = url;
+      }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const supplied: any = {
+      url: () => 'https://example.test/',
+      context: () => ({ pages: () => [supplied], newPage: async () => created }),
+    };
+    const target = 'https://chatgpt.com/c/missing';
+    const code = buildCliOperation(
+      { kind: 'ensure', conversationUrl: target },
+      'https://chatgpt.com/',
+      ['https://chatgpt.com'],
+      'open',
+    );
+    expect(decodedOutput(await new Function(`return (${code})`)()(supplied))).toEqual({
+      value: { conversationUrl: target },
+    });
+    expect(created.goto).toHaveBeenCalledWith(target);
+
+    current = 'about:blank';
+    created.goto = vi.fn(async () => {
+      current = 'https://chatgpt.com/c/other';
+    });
+    expect(decodedOutput(await new Function(`return (${code})`)()(supplied))).toEqual({
+      code: 'CHATGPT_CONVERSATION_UNAVAILABLE',
+    });
+  });
   it('returns only structured bridge data, never CLI snapshot output', async () => {
     const marker = {
       conversationUrl: 'https://chatgpt.com/c/test',

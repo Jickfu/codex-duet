@@ -1,4 +1,8 @@
-import type { BrowserAutomationSession, WaitOptions } from './browser-automation-session.js';
+import type {
+  BrowserAutomationSession,
+  BrowserConnectOptions,
+  WaitOptions,
+} from './browser-automation-session.js';
 import type { BrowserConnection } from './browser-connection.js';
 import { PlaywrightChatGPTWebAdapter } from './chatgpt-adapter.js';
 
@@ -11,7 +15,7 @@ export class LibraryChatGPTSession implements BrowserAutomationSession {
     private readonly timeoutMs = 120_000,
     private readonly debug = false,
   ) {}
-  async connect() {
+  async connect(options?: BrowserConnectOptions) {
     this.adapter = new PlaywrightChatGPTWebAdapter(
       await this.connection.connect(),
       this.url,
@@ -19,7 +23,7 @@ export class LibraryChatGPTSession implements BrowserAutomationSession {
       this.debug,
       this.origins,
     );
-    await this.adapter.connect();
+    return this.adapter.connect(options);
   }
   async ensureConversation() {
     await this.required().ensureConversation();

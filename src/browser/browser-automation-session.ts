@@ -9,9 +9,17 @@ export interface WaitOptions {
   timeoutMs?: number;
 }
 
+export interface BrowserConnectOptions {
+  conversationUrl?: string;
+}
+
+export interface BrowserConversationSelection {
+  conversationUrl: string;
+}
+
 /** Transport-independent capability boundary consumed by send/wait. */
 export interface BrowserAutomationSession {
-  connect(): Promise<void>;
+  connect(options?: BrowserConnectOptions): Promise<BrowserConversationSelection>;
   ensureConversation(): Promise<void>;
   isLoggedIn(): Promise<boolean>;
   sendMessage(message: string): Promise<SendMarker>;

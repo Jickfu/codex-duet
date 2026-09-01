@@ -226,6 +226,64 @@ describe('ChatGPT adapter fixture', () => {
     await expect(adapter.connect()).rejects.toMatchObject({ code: 'CHATGPT_TAB_AMBIGUOUS' });
     await isolated.close();
   });
+  it('targets one exact conversation despite unrelated ChatGPT tabs', async () => {
+    const isolated = await browser.newContext();
+    await isolated.route('https://chatgpt.com/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<div id="prompt-textarea" role="textbox" contenteditable="true"></div>',
+      }),
+    );
+    const one = await isolated.newPage();
+    const two = await isolated.newPage();
+    const three = await isolated.newPage();
+    await Promise.all([
+      one.goto('https://chatgpt.com/c/one'),
+      two.goto('https://chatgpt.com/c/two'),
+      three.goto('https://chatgpt.com/c/three'),
+    ]);
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    expect(await adapter.connect({ conversationUrl: 'https://chatgpt.com/c/two' })).toEqual({
+      conversationUrl: 'https://chatgpt.com/c/two',
+    });
+    expect(await adapter.isLoggedIn()).toBe(true);
+    expect(one.url()).toBe('https://chatgpt.com/c/one');
+    expect(three.url()).toBe('https://chatgpt.com/c/three');
+    await isolated.close();
+  });
+  it('reopens an exact missing conversation and never falls back', async () => {
+    const isolated = await browser.newContext();
+    await isolated.route('https://chatgpt.com/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<div id="prompt-textarea" role="textbox" contenteditable="true"></div>',
+      }),
+    );
+    const other = await isolated.newPage();
+    await other.goto('https://chatgpt.com/c/other');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    expect(await adapter.connect({ conversationUrl: 'https://chatgpt.com/c/missing' })).toEqual({
+      conversationUrl: 'https://chatgpt.com/c/missing',
+    });
+    expect(isolated.pages().map((page) => page.url())).toContain('https://chatgpt.com/c/missing');
+    expect(other.url()).toBe('https://chatgpt.com/c/other');
+    await isolated.close();
+  });
+  it('fails closed when reopening the exact target cannot navigate', async () => {
+    const isolated = await browser.newContext();
+    await isolated.route('https://chatgpt.com/c/missing', (route) => route.abort('failed'));
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await expect(
+      adapter.connect({ conversationUrl: 'https://chatgpt.com/c/missing' }),
+    ).rejects.toMatchObject({ code: 'CHATGPT_CONVERSATION_UNAVAILABLE' });
+    await isolated.close();
+  });
   it('reports timeout and never returns partial text', async () => {
     const { page, adapter } = await connectedFixture();
     await page.evaluate(() => {

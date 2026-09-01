@@ -11,7 +11,7 @@ export const CHATGPT_MESSAGE_SELECTOR = '[data-message-author-role]';
 export const CHATGPT_USER_SELECTOR = '[data-message-author-role="user"][data-message-id]';
 
 export type CliOperation =
-  | { kind: 'ensure' | 'login' | 'prepare' }
+  | { kind: 'ensure' | 'login' | 'prepare'; conversationUrl?: string }
   | {
       kind: 'commit';
       message: string;
@@ -64,9 +64,10 @@ export function buildCliOperation(
     const encode=v=>{const s=encodeURIComponent(JSON.stringify(v));let h='';for(let i=0;i<s.length;i++)h+=s.charCodeAt(i).toString(16).padStart(2,'0');return h};
     const result=v=>'CHATBRIDGE_RESULT_'+c.nonce+'_'+encode(v);
     const bridgeError=e=>'CHATBRIDGE_ERROR_'+c.nonce+'_'+encode({code:e});
+    const canonical=u=>u.split('#')[0];
     const candidates=()=>page.context().pages().filter(p=>allowed(p.url()));
-    const selected=()=>{if(allowed(page.url()))return page;const items=candidates();if(items.length>1)fail('CHATGPT_TAB_AMBIGUOUS');return items[0]};
-    const exact=url=>page.url()===url?page:page.context().pages().find(p=>p.url()===url);
+    const exact=url=>canonical(page.url())===url?page:page.context().pages().find(p=>canonical(p.url())===url);
+    const selected=url=>{if(url)return exact(url);if(allowed(page.url()))return page;const items=candidates();if(items.length>1)fail('CHATGPT_TAB_AMBIGUOUS');return items[0]};
     const metadata=async(target,execute=action=>action())=>{const result=[];for(const item of await execute(()=>target.$$(c.selectors.message))){const id=await execute(()=>item.getAttribute('data-message-id'));const role=await execute(()=>item.getAttribute('data-message-author-role'));if(typeof role==='string')result.push(validId(id)?{id,role}:{role})}return result};
     const latest=(items,role)=>{for(let i=items.length-1;i>=0;i--)if(items[i].role===role&&items[i].id)return items[i].id};
     const delay=ms=>page.waitForTimeout(ms);
@@ -80,8 +81,9 @@ export function buildCliOperation(
     const step=async action=>{guard();try{const value=await action();guard();return value}catch(error){guard();throw error}};
     try{
       if(c.operation.kind==='ensure'||c.operation.kind==='login'||c.operation.kind==='prepare'){
-        let choice=selected();if(!choice){choice=await page.context().newPage();await choice.goto(c.url)}bind(choice);guard();
-        if(c.operation.kind==='ensure')return result({ok:true});
+        let choice=selected(c.operation.conversationUrl);if(!choice){choice=await page.context().newPage();try{await choice.goto(c.operation.conversationUrl||c.url)}catch(error){if(c.operation.conversationUrl)fail('CHATGPT_CONVERSATION_UNAVAILABLE');throw error}}bind(choice);guard();
+        if(c.operation.conversationUrl&&canonical(choice.url())!==c.operation.conversationUrl)fail('CHATGPT_CONVERSATION_UNAVAILABLE');
+        if(c.operation.kind==='ensure')return result({value:{conversationUrl:choice.url()}});
         if(c.operation.kind==='login'){const composer=await step(()=>target.$(c.selectors.composer));return result({value:composer?await step(()=>composer.isVisible()):false})}
         const items=await step(()=>metadata(target));
         return result({value:{conversationUrl:target.url(),previousUserMessageId:latest(items,'user'),previousAssistantMessageId:latest(items,'assistant')}})
@@ -110,7 +112,7 @@ export function buildCliOperation(
       let stable;
       const text=await poll(async()=>{const handles=await step(()=>target.$$(c.selectors.message));let current;for(const handle of handles)if(await step(()=>handle.getAttribute('data-message-id'))===assistantId){current=handle;break}if(!current)return;const streaming=await step(()=>current.getAttribute('data-message-streaming'))==='true'||Boolean(await step(()=>current.$(c.selectors.streaming)));const stopped=Boolean(await step(()=>target.$(c.selectors.stop)));const value=(await step(()=>current.innerText())).trim();if(streaming||stopped||!value){stable=undefined;return}if(stable===value)return value;stable=value},Math.max(1,deadline-Date.now()));
       return result({value:text})
-    }catch(error){const code=error&&typeof error.message==='string'?error.message:'';if(sendLifecycle==='COMMIT_ATTEMPTED'&&code!=='ORIGIN_DENIED')return bridgeError('SEND_OBSERVER_FAILED');if(['ORIGIN_DENIED','BRIDGE_TIMEOUT','CHATGPT_DOCUMENT_MISSING','CHATGPT_MESSAGE_ID_UNAVAILABLE','CHATGPT_TAB_AMBIGUOUS','CHATGPT_CONVERSATION_NOT_FOUND'].includes(code))return bridgeError(code);throw error}
+    }catch(error){const code=error&&typeof error.message==='string'?error.message:'';if(sendLifecycle==='COMMIT_ATTEMPTED'&&code!=='ORIGIN_DENIED')return bridgeError('SEND_OBSERVER_FAILED');if(['ORIGIN_DENIED','BRIDGE_TIMEOUT','CHATGPT_DOCUMENT_MISSING','CHATGPT_MESSAGE_ID_UNAVAILABLE','CHATGPT_TAB_AMBIGUOUS','CHATGPT_CONVERSATION_NOT_FOUND','CHATGPT_CONVERSATION_UNAVAILABLE'].includes(code))return bridgeError(code);throw error}
     finally{if(target&&navigationGuard)target.off('framenavigated',navigationGuard)}
   }`;
 }

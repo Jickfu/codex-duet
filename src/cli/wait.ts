@@ -1,6 +1,14 @@
 import { parseEnvelope } from '../core/protocol.js';
 import { runtime } from './runtime.js';
-export async function wait(parse: boolean, timeout?: number) {
+import { taskAwareWait } from './task-browser.js';
+
+export async function wait(parse: boolean, timeout?: number, taskId?: string) {
+  if (taskId) {
+    const text = await taskAwareWait(taskId, timeout);
+    if (parse) console.log(JSON.stringify(parseEnvelope(text), null, 2));
+    else console.log(text);
+    return;
+  }
   const r = await runtime();
   try {
     const session = await r.store.read();

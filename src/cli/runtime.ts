@@ -7,7 +7,9 @@ import { PlaywrightCliRunner } from '../browser/playwright-cli-runner.js';
 import { PlaywrightCliChatGPTSession } from '../browser/playwright-cli-session.js';
 import { LibraryChatGPTSession } from '../browser/library-chatgpt-session.js';
 import { SessionStore } from '../core/checkpoint.js';
-export async function runtime() {
+import type { BrowserConnectOptions } from '../browser/browser-automation-session.js';
+
+export async function runtime(options: BrowserConnectOptions = {}) {
   const config = loadConfig();
   const selection = await new RuntimeStore(path.resolve(process.cwd(), '.chatbridge')).read();
   if (!selection) throw new Error('No browser is attached. Run `chatbridge browser attach` first.');
@@ -19,11 +21,12 @@ export async function runtime() {
       config.allowedOrigins,
       config.timeoutMs,
     );
-    await adapter.connect();
+    const browserSelection = await adapter.connect(options);
     return {
       config,
       connection: { close: async () => undefined },
       adapter,
+      selection: browserSelection,
       store: new SessionStore(path.resolve(process.cwd(), '.chatbridge')),
     };
   }
@@ -35,11 +38,12 @@ export async function runtime() {
     config.timeoutMs,
     config.debug,
   );
-  await adapter.connect();
+  const browserSelection = await adapter.connect(options);
   return {
     config,
     connection,
     adapter,
+    selection: browserSelection,
     store: new SessionStore(path.resolve(process.cwd(), '.chatbridge')),
   };
 }

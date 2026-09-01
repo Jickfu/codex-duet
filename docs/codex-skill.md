@@ -54,7 +54,7 @@ The first review deliberately returned `PLAN` iteration 2. After canonical `wait
 - M3.0 Single-Round Orchestration: **Frozen**.
 - M3 overall: **IN PROGRESS**.
 - M3.1 Automatic Multi-Round Review/Fix Loop: **Frozen / Desktop E2E PASS**.
-- M3.2a Task ↔ ChatGPT Conversation Binding: **DESIGN FROZEN / IMPLEMENTATION NEXT**.
+- M3.2a Task ↔ ChatGPT Conversation Binding: **IMPLEMENTATION COMPLETE / DESKTOP E2E MANUAL REQUIRED**.
 - M3.2b `EXECUTING` Crash Reconciliation: **PLANNED**.
 - M3.2c Resume / Browser UX Hardening: **PLANNED**.
 
@@ -72,10 +72,10 @@ New tasks default to eight iterations. `chatbridge duet init --max-iterations <n
 - At durable `REVIEWING`, a Browser wait timeout permits retrying `wait --parse` and ingest against the existing send checkpoint; it does not permit resending the review envelope or replaying Executor side effects.
 - Multiple ChatGPT tabs without an explicit current target fail closed with `CHATGPT_TAB_AMBIGUOUS`; M3.2a freezes deterministic task/conversation targeting while preserving this unscoped behavior.
 
-## M3.2a task-aware Browser direction
+## M3.2a task-aware Browser operations
 
-[ADR-013](adr/ADR-013-task-conversation-binding.md) freezes one durable task ↔ one ChatGPT conversation. The implementation will add public `send --task` and `wait --task` targeting backed by `.chatbridge/runs/<taskId>/browser.json`. Task-aware operations read the binding before browser connection and use the exact conversation URL plus task-scoped outgoing message ID. Multiple unrelated ChatGPT tabs do not affect a bound task.
+[ADR-013](adr/ADR-013-task-conversation-binding.md) freezes one durable task ↔ one ChatGPT conversation. Public `send --task` and `wait --task` targeting is backed by `.chatbridge/runs/<taskId>/browser.json`. Task-aware operations read the binding before browser connection and use the exact conversation URL plus task-scoped outgoing message ID. Multiple unrelated ChatGPT tabs do not affect a bound task.
 
 The first task-aware send remains fail-closed: without an existing binding or explicit validated `--conversation-url`, multiple eligible ChatGPT tabs still return `CHATGPT_TAB_AMBIGUOUS`. A missing bound tab is reopened only at the exact allowlisted URL; failure returns `CHATGPT_CONVERSATION_UNAVAILABLE`, never an automatic rebind. Unscoped `send` and `wait` retain Frozen M1 behavior and `.chatbridge/session.json` compatibility.
 
-Until M3.2a implementation lands, this section is design direction, not a claim that the task-aware CLI exists. `EXECUTING` crash reconciliation remains deferred to M3.2b, and explicit rebind/cleanup/recovery UX remains deferred to M3.2c.
+Planner and Reviewer traffic in the repository Skill uses `send --task <taskId>` and `wait --task <taskId> --parse`. A confirmed send plus wait timeout permits only another task-aware wait; it never permits replay. `EXECUTING` crash reconciliation remains deferred to M3.2b, and explicit rebind/cleanup/recovery UX remains deferred to M3.2c. Real Desktop multiple-tab E2E remains **MANUAL REQUIRED** and is not implied by the implementation test suite.

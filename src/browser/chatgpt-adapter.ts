@@ -1,6 +1,11 @@
 import type { BrowserContext, ElementHandle, Frame, Page } from 'playwright';
 import { BridgeTimeoutError, ChatbridgeError } from '../core/errors.js';
-import type { SendMarker, WaitOptions } from './browser-automation-session.js';
+import type {
+  BrowserConnectOptions,
+  BrowserConversationSelection,
+  SendMarker,
+  WaitOptions,
+} from './browser-automation-session.js';
 import {
   CHATGPT_COMPOSER_SELECTOR,
   CHATGPT_MESSAGE_SELECTOR,
@@ -9,11 +14,12 @@ import {
   CHATGPT_STREAMING_SELECTOR,
 } from './chatgpt-rules.js';
 import { OriginPolicy } from './origin-policy.js';
+import { ConversationUrlPolicy } from './conversation-url.js';
 
 const MESSAGE_ID = /^[A-Za-z0-9_-]+$/;
 
 export interface ChatGPTWebAdapter {
-  connect(): Promise<void>;
+  connect(options?: BrowserConnectOptions): Promise<BrowserConversationSelection>;
   ensureConversation(): Promise<void>;
   isLoggedIn(): Promise<boolean>;
   sendMessage(message: string): Promise<SendMarker>;
@@ -23,6 +29,7 @@ export interface ChatGPTWebAdapter {
 export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
   private page?: Page;
   private readonly originPolicy: OriginPolicy;
+  private readonly conversationUrls: ConversationUrlPolicy;
   constructor(
     private readonly context: BrowserContext,
     private readonly url: string,
@@ -32,8 +39,44 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
     private readonly operationBoundary?: (name: 'before-text-extraction') => Promise<void> | void,
   ) {
     this.originPolicy = new OriginPolicy(allowedOrigins);
+    this.conversationUrls = new ConversationUrlPolicy(allowedOrigins);
   }
-  async connect() {
+  async connect(options: BrowserConnectOptions = {}): Promise<BrowserConversationSelection> {
+    if (options.conversationUrl) {
+      const target = this.conversationUrls.canonicalize(options.conversationUrl);
+      const existing = this.context
+        .pages()
+        .find((page) => this.canonicalPageUrl(page.url()) === target);
+      if (existing) this.page = existing;
+      if (!this.page) {
+        const page = await this.context.newPage();
+        try {
+          this.originPolicy.assertAllowed(target);
+          await page.goto(target);
+          this.originPolicy.assertAllowed(page.url());
+          if (this.canonicalPageUrl(page.url()) !== target)
+            throw new ChatbridgeError(
+              'ChatGPT conversation did not resolve to the exact target',
+              'CHATGPT_CONVERSATION_UNAVAILABLE',
+            );
+          this.page = page;
+        } catch (error) {
+          await page.close().catch(() => undefined);
+          if (error instanceof ChatbridgeError) throw error;
+          throw new ChatbridgeError(
+            'The bound ChatGPT conversation is unavailable',
+            'CHATGPT_CONVERSATION_UNAVAILABLE',
+          );
+        }
+      }
+      await this.ensureConversation();
+      if (this.canonicalPageUrl(this.requiredPage().url()) !== target)
+        throw new ChatbridgeError(
+          'ChatGPT conversation identity changed',
+          'CHATGPT_CONVERSATION_UNAVAILABLE',
+        );
+      return { conversationUrl: target };
+    }
     const candidates = this.context.pages().filter((page) => this.originPolicy.allows(page.url()));
     if (candidates.length > 1)
       throw new ChatbridgeError(
@@ -42,6 +85,7 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
       );
     this.page = candidates[0] ?? (await this.context.newPage());
     await this.ensureConversation();
+    return { conversationUrl: this.conversationUrls.canonicalize(this.requiredPage().url()) };
   }
   async ensureConversation() {
     const page = this.requiredPage();
@@ -230,6 +274,13 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
   private requiredPage() {
     if (!this.page) throw new ChatbridgeError('Adapter is not connected', 'NOT_CONNECTED');
     return this.page;
+  }
+  private canonicalPageUrl(value: string): string | undefined {
+    try {
+      return this.conversationUrls.canonicalize(value);
+    } catch {
+      return undefined;
+    }
   }
   private assertPageAllowed() {
     this.originPolicy.assertAllowed(this.requiredPage().url());

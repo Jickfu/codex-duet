@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted as the M3.2a design freeze. Implementation is next.
+Accepted as the M3.2a design freeze. Implementation is complete; real Desktop multiple-tab E2E is still required.
 
 ## Context
 

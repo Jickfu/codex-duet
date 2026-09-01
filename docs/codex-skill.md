@@ -1,10 +1,10 @@
 # Codex Desktop Skill
 
-Status: **M3.0 Single-Round Orchestration Frozen**
+Status: **M3.0 and M3.1 Frozen**
 
 Desktop E2E: **PASS**
 
-M3.1 Desktop multi-round E2E: **MANUAL REQUIRED**
+M3.1 Desktop multi-round E2E: **PASS**
 
 ## Dogfood regression note
 
@@ -45,12 +45,16 @@ The repeatable manual acceptance procedure is:
 
 The dogfood task branch remains unmerged and its `REVIEW_REF` remains immutable acceptance evidence.
 
+The real M3.1 automatic multi-round acceptance completed with task `m3-multi-round-dogfood-20260902` on the single task branch `agent/task-m3-multi-round-dogfood-20260902`. Its immutable task base was `02a3fdb6c35a3766527543bb703b8ac67feeb194`; review refs advanced monotonically from `590ae12a8c9f21b8cea19480b7946c6d14fdf4c5` to `d99559b03eacff5e6447c95fa77fc12287e29134`.
+
+The first review deliberately returned `PLAN` iteration 2. After canonical `wait --parse` → validated Envelope JSON → `duet ingest`, the current Codex Desktop Executor automatically continued without another user prompt. The second review inspected delta `590ae12a8c9f21b8cea19480b7946c6d14fdf4c5..d99559b03eacff5e6447c95fa77fc12287e29134`, then approved formal range `02a3fdb6c35a3766527543bb703b8ac67feeb194..d99559b03eacff5e6447c95fa77fc12287e29134` as `DONE` iteration 2. Both iterations passed 168 of 168 tests. Iteration-scoped plan and review artifacts remained in durable history, and Frozen M2 performed both safe pushes. The dogfood branch remains unmerged as immutable acceptance evidence.
+
 ## Roadmap
 
 - M3.0 Single-Round Orchestration: **Frozen**.
 - M3 overall: **IN PROGRESS**.
-- M3.1 Automatic Multi-Round Review/Fix Loop: **IMPLEMENTATION COMPLETE / DESKTOP E2E MANUAL REQUIRED**.
-- M3.2 Recovery / Conversation Binding / UX Hardening: **PLANNED**.
+- M3.1 Automatic Multi-Round Review/Fix Loop: **Frozen / Desktop E2E PASS**.
+- M3.2 Recovery / Conversation Binding / UX Hardening: **NEXT**.
 
 M3.1 builds on the frozen single-round contract. One task keeps one branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` continues automatically under the current Codex Desktop Executor, subject to deterministic guards and a configurable iteration limit. M3.1 does not add a Node agent loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
 

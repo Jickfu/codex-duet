@@ -2,11 +2,13 @@
 
 ## Status
 
-Accepted as the M3.1 contract design freeze before implementation.
+Accepted. M3.1 implementation and Desktop E2E acceptance are frozen at implementation baseline `02a3fdb6c35a3766527543bb703b8ac67feeb194`.
+
+The decision is unchanged. The real two-round Desktop acceptance used immutable `BASE_REF` `02a3fdb6c35a3766527543bb703b8ac67feeb194`, monotonically advanced from review ref `590ae12a8c9f21b8cea19480b7946c6d14fdf4c5` to `d99559b03eacff5e6447c95fa77fc12287e29134`, and completed at durable `DONE` iteration 2 after automatic continuation.
 
 ## Context
 
-M3.0 durably supports a Reviewer returning `PLAN` for the next iteration but intentionally stops instead of executing another round. M3.1 will continue valid review-directed corrections automatically while preserving the Frozen M1 Browser Control Plane, Frozen M2 GitHub Data Plane, and Frozen M3.0 safety ordering.
+M3.0 durably supports a Reviewer returning `PLAN` for the next iteration but intentionally stops instead of executing another round. M3.1 continues valid review-directed corrections automatically while preserving the Frozen M1 Browser Control Plane, Frozen M2 GitHub Data Plane, and Frozen M3.0 safety ordering.
 
 A multi-round task needs both an efficient way to inspect the latest correction and an authoritative identity for approving the complete task result. It must also preserve one task, one branch, and one immutable initialization base without changing the Frozen C2C/1 header schema.
 

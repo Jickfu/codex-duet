@@ -115,13 +115,17 @@ Design status: **Frozen**
 
 Implementation status: **Complete**
 
-Desktop multi-round E2E: **MANUAL REQUIRED**
+Desktop multi-round E2E: **PASS**
+
+Frozen implementation baseline: `02a3fdb6c35a3766527543bb703b8ac67feeb194`
+
+The multi-round dogfood review refs are immutable acceptance evidence, not the M3.1 implementation baseline.
 
 M3.1 extends the Frozen M1 Browser Control Plane, Frozen M2 GitHub Data Plane, and Frozen M3.0 single-round orchestration. It does not change `BASE_REF` or `REVIEW_REF` semantics, M2 push rules, M1 send/wait behavior, `PLAN → EXECUTING` safety, or the requirement that review send succeeds before `REVIEWING`.
 
 ### Multi-round lifecycle
 
-M3.1 will continue a valid Reviewer-requested plan without another user prompt:
+M3.1 continues a valid Reviewer-requested plan without another user prompt:
 
 ```text
 PLANNING
@@ -160,7 +164,7 @@ PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF
 
 The Reviewer first inspects this delta to understand the correction and detect regressions, then validates the cumulative formal range to approve the task as a whole. The delta is an efficiency hint, not a correctness identity.
 
-`PREVIOUS_REVIEW_REF` is not a new C2C header. M0 remains frozen. M3.1 will place the previous durable review SHA in the `EXECUTED` content while continuing to carry task, iteration, `BASE_REF`, current `REVIEW_REF`, and test status through existing fields. Codex must not infer or invent any SHA.
+`PREVIOUS_REVIEW_REF` is not a new C2C header. M0 remains frozen. M3.1 places the previous durable review SHA in the `EXECUTED` content while continuing to carry task, iteration, `BASE_REF`, current `REVIEW_REF`, and test status through existing fields. Codex must not infer or invent any SHA.
 
 ### Iteration and commit semantics
 
@@ -231,7 +235,7 @@ M3.0 V1 checkpoints remain readable without status-time mutation. The first muta
 
 ### Automatic continuation and stop semantics
 
-After a valid `REVIEWING N → PLAN N+1` ingest, M3.1 will read the durable next plan, begin execution, edit, test, commit, prepare review through Frozen M2, send, mark reviewing, receive with `wait --parse`, ingest, and repeat. A next-round plan should describe the prior findings, required corrections, behavior to preserve, necessary tests, and scope boundaries rather than restart the task.
+After a valid `REVIEWING N → PLAN N+1` ingest, M3.1 reads the durable next plan, begins execution, edits, tests, commits, prepares review through Frozen M2, sends, marks reviewing, receives with `wait --parse`, ingests, and repeats. A next-round plan should describe the prior findings, required corrections, behavior to preserve, necessary tests, and scope boundaries rather than restart the task.
 
 The loop stops on:
 
@@ -287,6 +291,84 @@ Iteration 3:
 
 The authoritative decision is recorded in [ADR-012](../adr/ADR-012-multi-round-review-identity.md).
 
+### Real Desktop automatic multi-round E2E acceptance
+
+M3.1 Desktop Automatic Multi-Round E2E: **PASS**
+
+- Task: `m3-multi-round-dogfood-20260902`
+- Task branch: `agent/task-m3-multi-round-dogfood-20260902`
+- `BASE_REF`: `02a3fdb6c35a3766527543bb703b8ac67feeb194`
+- `REVIEW_REF_1`: `590ae12a8c9f21b8cea19480b7946c6d14fdf4c5`
+- `REVIEW_REF_2`: `d99559b03eacff5e6447c95fa77fc12287e29134`
+- Iteration 2 delta: `590ae12a8c9f21b8cea19480b7946c6d14fdf4c5..d99559b03eacff5e6447c95fa77fc12287e29134`
+- Final formal range: `02a3fdb6c35a3766527543bb703b8ac67feeb194..d99559b03eacff5e6447c95fa77fc12287e29134`
+- Test status: iteration 1 `PASS` — 168 of 168; iteration 2 `PASS` — 168 of 168.
+- Final durable state: `DONE`, iteration 2.
+
+The real lifecycle completed as:
+
+```text
+INIT
+→ PLANNING
+→ PLAN(1)
+→ EXECUTING(1)
+→ EXECUTED(1)
+→ REVIEWING(1)
+→ PLAN(2)
+→ EXECUTING(2)
+→ EXECUTED(2)
+→ REVIEWING(2)
+→ DONE(2)
+```
+
+Planner and both Reviewer responses used the canonical receive path:
+
+```text
+wait --parse
+→ validated Envelope JSON
+→ duet ingest
+```
+
+Iteration 1 review of `BASE_REF..REVIEW_REF_1` confirmed exactly one commit and one tracked acceptance document containing only the title and iteration 1 marker. The Reviewer intentionally returned `STATE: PLAN`, `ITERATION: 2`, rather than `DONE`.
+
+After durable `REVIEWING(1) → PLAN(2)` ingest, the current Codex Desktop Executor continued automatically without another user prompt. It read the durable plan, began execution, added only the requested iteration 2 marker, tested, committed on the same task branch, prepared the next immutable review through Frozen M2, sent it, marked reviewing, waited, and ingested the result. No second Codex agent, Codex CLI, Codex SDK, or Node Executor loop was used. **Automatic continuation: PASS.**
+
+Iteration 2 review first inspected the delta `REVIEW_REF_1..REVIEW_REF_2`, confirming exactly one required line was added while iteration 1 content was preserved. It then inspected the authoritative cumulative range `BASE_REF..REVIEW_REF_2`, confirming exactly two commits, only the acceptance document, the complete required final content, and no M1/M2/M3 implementation changes. The Reviewer returned `STATE: DONE`, `ITERATION: 2`. **Delta review focus: PASS. Formal cumulative review: PASS.**
+
+`git merge-base --is-ancestor REVIEW_REF_1 REVIEW_REF_2` succeeded. The immutable task-level `BASE_REF` remained unchanged, and the previous review SHA came from durable iteration history. Review-ref monotonicity is verified.
+
+Durable evidence was preserved without overwriting earlier rounds:
+
+```text
+.chatbridge/runs/m3-multi-round-dogfood-20260902/
+  request.md
+  iterations/
+    1/
+      plan.md
+      review-envelope.txt
+    2/
+      plan.md
+      review-envelope.txt
+```
+
+Both rounds used `duet prepare-review`, which delegated branch safety, clean-worktree enforcement, safe push, remote-SHA verification, and immutable `REVIEW_REF` creation to Frozen M2. Codex did not push directly. No pull request, merge, force-push, or alternate task branch was created. The dogfood branch remains unmerged and must not be deleted; `d99559b03eacff5e6447c95fa77fc12287e29134` remains immutable M3.1 Desktop acceptance evidence.
+
+### M3.1 frozen implementation contract
+
+M3.1 is **Frozen** at implementation baseline `02a3fdb6c35a3766527543bb703b8ac67feeb194`. The frozen contract is:
+
+1. One task has one immutable `BASE_REF` and one task branch.
+2. Formal review identity is always `BASE_REF..CURRENT_REVIEW_REF`.
+3. For iteration greater than 1, `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is a delta focus and never replaces the formal range.
+4. The previous review ref comes only from durable history, and review refs advance monotonically.
+5. Reviewer `PLAN N+1` uses iteration `N+1`; `DONE`, `BLOCKED`, and `FAILED` use the current iteration `N`.
+6. A valid `PLAN N+1` continues automatically under the current Codex Desktop Executor without requiring another user prompt.
+7. Codex remains the only Executor; deterministic M3 lifecycle authority does not become an Executor loop.
+8. V2 checkpoints preserve complete iteration history and iteration-scoped artifacts without overwriting; V1 checkpoints remain compatible.
+9. `maxIterations` defaults to 8, accepts 1 through 100, and exhaustion remains `REVIEWING` with durable `ITERATION_LIMIT_REACHED`, never `DONE`.
+10. Frozen M2 remains solely responsible for push and ref safety; Frozen M1 carries only compact Browser Control Plane data while source and diffs remain on the GitHub Data Plane.
+11. Full `EXECUTING` crash reconciliation and conversation binding remain outside M3.1.
+
 ## Known issues
 
 ### ChatGPT tab ambiguity
@@ -299,10 +381,10 @@ The external Skill validator could not run because the current Python environmen
 
 ## M3 roadmap
 
-| Sub-stage | Scope                                          | Status                                            |
-| --------- | ---------------------------------------------- | ------------------------------------------------- |
-| M3.0      | Codex Skill + Single-Round Orchestration       | **FROZEN**                                        |
-| M3.1      | Automatic Multi-Round Review/Fix Loop          | **IMPLEMENTATION COMPLETE / E2E MANUAL REQUIRED** |
-| M3.2      | Recovery / Conversation Binding / UX Hardening | **PLANNED**                                       |
+| Sub-stage | Scope                                          | Status                        |
+| --------- | ---------------------------------------------- | ----------------------------- |
+| M3.0      | Codex Skill + Single-Round Orchestration       | **FROZEN**                    |
+| M3.1      | Automatic Multi-Round Review/Fix Loop          | **FROZEN / DESKTOP E2E PASS** |
+| M3.2      | Recovery / Conversation Binding / UX Hardening | **NEXT**                      |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

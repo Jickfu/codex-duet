@@ -6,7 +6,7 @@
 
 ChatGPT Web is the planner, architect, and reviewer. Codex Desktop is the outer orchestrator, and Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries compact control messages without feeding screenshots, DOM snapshots, chat history, repositories, or large diffs into the model context.
 
-This release includes the **Frozen M2 GitHub Mode MVP** data plane. Its frozen implementation baseline is `f4b1dd012f79b8a6522f56d40d46f7af39a14923`. Local MCP, cloudflared, PR automation, and the durable orchestrator are deliberately not implemented.
+This release includes the **Frozen M2 GitHub Mode MVP** data plane and the **Frozen M3.0/M3.1 durable Desktop orchestrator**. The M3.1 frozen implementation baseline is `02a3fdb6c35a3766527543bb703b8ac67feeb194`, with real automatic multi-round Desktop E2E acceptance complete. Local MCP, cloudflared, and PR automation are not implemented.
 
 ## Architecture summary
 
@@ -19,7 +19,7 @@ GITHUB mode → GitHub Data Plane
 LOCAL mode  → Read-only MCP Data Plane (planned M4/M5)
 ```
 
-GITHUB mode is implemented and frozen at M2. The Codex Skill/orchestrator is planned for M3; LOCAL MCP and `submit_response` are planned for M4; cloudflared lifecycle is planned for M5. Both modes share one C2C/state-machine/orchestration core. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), and [LOCAL mode](docs/local-mode.md).
+GITHUB mode is implemented and frozen at M2. The Codex Skill, single-round orchestration, and automatic multi-round Review/Fix Loop are frozen through M3.1; M3.2 recovery, conversation binding, and UX hardening are next. LOCAL MCP and `submit_response` are planned for M4; cloudflared lifecycle is planned for M5. Both modes share one C2C/state-machine/orchestration core. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), [the M3 milestone](docs/milestones/M3-durable-orchestrator.md), and [LOCAL mode](docs/local-mode.md).
 
 ## Install
 

@@ -6,7 +6,7 @@
 
 ChatGPT Web is the planner, architect, and reviewer. Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries control messages without feeding screenshots, DOM snapshots, chat history, or polling loops into the model context.
 
-This release implements the **M2 GitHub Mode MVP** data plane. Local MCP, cloudflared, PR automation, and the durable orchestrator are deliberately not implemented.
+This release includes the **Frozen M2 GitHub Mode MVP** data plane. Its frozen implementation baseline is `f4b1dd012f79b8a6522f56d40d46f7af39a14923`. Local MCP, cloudflared, PR automation, and the durable orchestrator are deliberately not implemented.
 
 ## Install
 

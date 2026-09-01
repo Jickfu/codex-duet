@@ -1,6 +1,43 @@
 # M2 — GitHub Mode MVP
 
+Status: **Frozen**
+
+Frozen implementation baseline: `f4b1dd012f79b8a6522f56d40d46f7af39a14923`
+
 M2 adds the deterministic Git/GitHub data plane. It does not add the M3 orchestrator.
+
+## Frozen contract
+
+1. Local Git correctness-critical operations use the deterministic Git CLI through `GitRunner`.
+2. GitHub Platform capabilities are a separate future layer.
+3. One task owns one generated `agent/task-<taskId>` branch.
+4. A dirty worktree blocks task initialization and review preparation.
+5. `BASE_REF` is the immutable full 40-character SHA captured at task initialization.
+6. `REVIEW_REF` is the immutable full 40-character local `HEAD` after task execution.
+7. Formal review identity is exactly `BASE_REF..REVIEW_REF`; moving refs are never formal review identities.
+8. Push is limited to the same task branch. Force, force-with-lease, mirror, all-branch, and default-branch pushes are forbidden.
+9. The remote task-branch SHA must equal local `REVIEW_REF` before the task becomes `EXECUTED`.
+10. Durable task metadata is versioned, schema-validated, and project-scoped.
+11. Browser Bridge remains the Control Plane only; GitHub is the GITHUB-mode code/data plane.
+12. Browser Bridge never carries source, diffs, or repository archives for GitHub review.
+13. M3 must consume the frozen `CodeProvider` and `BrowserAutomationSession` boundaries instead of bypassing them.
+
+Post-freeze M2 changes are limited to security defects, confirmed Git compatibility defects, confirmed GitHub transport compatibility defects, persistence/recovery defects, and regressions against this contract. M3 convenience is not a reason to reshape M2.
+
+## Real GitHub dogfood acceptance
+
+The M2 workflow was exercised against `Jickfu/codex-duet` with task `m2-dogfood-20260902` and task branch `agent/task-m2-dogfood-20260902`.
+
+- Acceptance range: `f4b1dd012f79b8a6522f56d40d46f7af39a14923..fdb97758eb0e4c9e470b27f700eb1ea6f1ea3c92`
+- `BASE_REF`: `f4b1dd012f79b8a6522f56d40d46f7af39a14923`
+- `REVIEW_REF`: `fdb97758eb0e4c9e470b27f700eb1ea6f1ea3c92`
+- Test status: `PASS` — 109 tests passed.
+- Local `HEAD`, durable `REVIEW_REF`, and remote task-branch SHA were identical.
+- GitHub comparison confirmed one commit ahead, merge base equal to `BASE_REF`, and exactly one changed file: `docs/acceptance/M2-github-mode-dogfood.md`.
+- The acceptance commit was documentation-only and is evidence, not the implementation baseline.
+- ChatGPT reviewed exactly the immutable range through the GitHub Data Plane and returned `PASS` with no findings.
+
+The dogfood branch is intentionally not merged or deleted as part of the freeze.
 
 ## Boundaries
 

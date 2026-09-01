@@ -17,6 +17,8 @@
 
 For final M1 acceptance, keep multiple ChatGPT tabs open, select the intended conversation, and complete two consecutive `send -> wait` rounds. Inspect `.chatbridge/session.json` only for schema validation: it must be version 2 and contain `conversationUrl`, `outgoingUserMessageId`, optional `previousAssistantMessageId`, and `sentAt`; it must not contain message text. Each wait must print only the exact final response.
 
+M1 acceptance completed on Windows 10 using the normal Chrome profile and official Playwright CLI Channel CDP transport. Two consecutive rounds returned the exact expected payloads, the version-2 checkpoints contained metadata only, and detach preserved Chrome, all tabs, and login state. The first attach may require interactive Chrome remote-debugging approval and return unavailable; retry after approval is expected UX.
+
 ### CLI sandbox baseline
 
 The official Playwright CLI `run-code` sandbox is a restricted execution environment, not web-page JavaScript and not complete Node.js. Native Channel CDP probing established this compatibility baseline:

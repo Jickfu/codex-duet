@@ -157,12 +157,11 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
           'Stable conversation identity did not appear after confirmed send',
         );
       } catch (error) {
-        if (error instanceof BridgeTimeoutError)
-          throw new ChatbridgeError(
-            'Send was confirmed but no stable conversation identity appeared; do not resend automatically',
-            'SEND_CHECKPOINT_PERSIST_FAILED',
-          );
-        throw error;
+        const diagnostic = error instanceof ChatbridgeError && error.code ? ` (${error.code})` : '';
+        throw new ChatbridgeError(
+          `Send was confirmed but a durable conversation checkpoint could not be established; do not resend automatically${diagnostic}`,
+          'SEND_CHECKPOINT_PERSIST_FAILED',
+        );
       }
       return {
         conversationUrl,

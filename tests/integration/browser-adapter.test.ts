@@ -148,6 +148,54 @@ describe('ChatGPT adapter fixture', () => {
     expect(await page.evaluate(() => (window as any).clicks)).toBe(1);
     await isolated.close();
   });
+  it('classifies an origin escape after outgoing ID confirmation as checkpoint failure', async () => {
+    const isolated = await browser.newContext();
+    let clicks = 0;
+    await isolated.exposeFunction('recordClick', () => clicks++);
+    await isolated.route('https://chatgpt.com/', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button><script>send.onclick=()=>{recordClick();const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-new';messages.append(user);setTimeout(()=>location.href='https://example.test/post-confirmation',60)}</script>`,
+      }),
+    );
+    await isolated.route('https://example.test/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<p>foreign</p>' }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    const failure = await adapter.sendMessage('hello').catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'SEND_CHECKPOINT_PERSIST_FAILED' });
+    expect((failure as Error).message).toContain('do not resend automatically');
+    expect(clicks).toBe(1);
+    await isolated.close();
+  });
+  it('preserves origin failure before outgoing ID confirmation', async () => {
+    const isolated = await browser.newContext();
+    let clicks = 0;
+    await isolated.exposeFunction('recordClick', () => clicks++);
+    await isolated.route('https://chatgpt.com/c/pre-confirmation', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send">Send</button><script>send.onclick=()=>{recordClick();setTimeout(()=>location.href='https://example.test/pre-confirmation',20)}</script>`,
+      }),
+    );
+    await isolated.route('https://example.test/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<p>foreign</p>' }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/pre-confirmation');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    await expect(adapter.sendMessage('hello')).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
+    expect(clicks).toBe(1);
+    await isolated.close();
+  });
   it('does not leak navigation guards across long-running operations', async () => {
     const { page, adapter } = await connectedFixture();
     const before = (page as any).listenerCount('framenavigated');

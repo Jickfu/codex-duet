@@ -661,6 +661,57 @@ describe('Playwright CLI transport', () => {
     expect(clicks).toBe(1);
   });
 
+  it('maps a post-confirmation CLI origin escape to checkpoint persistence failure', async () => {
+    let clicks = 0;
+    let currentUrl = 'https://chatgpt.com/';
+    let listener: ((frame: object) => void) | undefined;
+    let metadataReads = 0;
+    const frame = {};
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = {
+      isVisible: async () => true,
+      click: async () => {
+        clicks++;
+      },
+    };
+    const target: any = {
+      url: () => currentUrl,
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => frame,
+      on: (_event: string, value: (navigated: object) => void) => (listener = value),
+      off: vi.fn(),
+      $$: async () => [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async () => {
+        currentUrl = 'https://example.test/escape';
+        listener?.(frame);
+      },
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: 'https://chatgpt.com/',
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'post-confirmation-origin',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toEqual({ code: 'SEND_CHECKPOINT_PERSIST_FAILED' });
+    expect(clicks).toBe(1);
+  });
+
   it('does not attempt CLI recovery for a confirmed identity persistence failure', async () => {
     const target = 'https://chatgpt.com/';
     const operations: string[] = [];

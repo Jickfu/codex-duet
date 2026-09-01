@@ -1,12 +1,12 @@
 # Codex Desktop Skill
 
-Status: **M3.0 implementation complete**
+Status: **M3.0 Single-Round Orchestration Frozen**
 
-Desktop E2E: **MANUAL REQUIRED**
+Desktop E2E: **PASS**
 
 ## Dogfood regression note
 
-**M3.0 Desktop E2E finding #1:** the first real Desktop dogfood attempt exposed a contract mismatch between M1 `wait --parse` Envelope JSON and M3's raw-C2C-only ingest boundary. M3 now accepts both the canonical parsed JSON path and raw C2C compatibility path through the same protocol schema and lifecycle validation. The failed attempt is not an E2E pass; acceptance must restart with a fresh task after this fix.
+**M3.0 Desktop E2E finding #1:** the first real Desktop dogfood attempt exposed a contract mismatch between M1 `wait --parse` Envelope JSON and M3's raw-C2C-only ingest boundary. M3 now accepts both the canonical parsed JSON path and raw C2C compatibility path through the same protocol schema and lifecycle validation. That first attempt was not an E2E pass; the successful fresh-task acceptance is recorded in [the M3 milestone](milestones/M3-durable-orchestrator.md).
 
 ## Location and discovery
 
@@ -29,7 +29,11 @@ The Skill asks ChatGPT Web for a PLAN through the Frozen Browser Bridge before c
 
 No Codex CLI, Codex SDK, secondary Codex agent, daemon, or automated Codex Desktop UI control is required.
 
-## Windows Desktop manual acceptance
+## Windows Desktop acceptance
+
+The real M3.0 single-round acceptance completed with task `m3-single-round-dogfood-2-20260902`, immutable range `c7cec37f28f80a0dca38b34105aac828e8dd69e2..bfad099a9fd0474881c6e772363fe3b392f57860`, 142 of 142 tests passing, and final durable state `DONE`. Planner and Reviewer both used `wait --parse` → validated Envelope JSON → `duet ingest`. Reviewer recovery also confirmed that a Browser wait timeout does not authorize message replay.
+
+The repeatable manual acceptance procedure is:
 
 1. Start from a clean repository with a supported GitHub `origin` and an authenticated existing browser/session.
 2. Open the repository in Codex Desktop and issue the harmless docs-only example above.
@@ -37,7 +41,16 @@ No Codex CLI, Codex SDK, secondary Codex agent, daemon, or automated Codex Deskt
 4. Confirm Codex did not push directly, the remote task-branch SHA equals `REVIEW_REF`, and review used the immutable range.
 5. Confirm `.chatbridge/runs/<taskId>.json` supports a restart at each documented safe state.
 
-Do not report Desktop Skill E2E as passed until a real user completes this procedure.
+The dogfood task branch remains unmerged and its `REVIEW_REF` remains immutable acceptance evidence.
+
+## Roadmap
+
+- M3.0 Single-Round Orchestration: **Frozen**.
+- M3 overall: **IN PROGRESS**.
+- M3.1 Automatic Multi-Round Review/Fix Loop: **NEXT**.
+- M3.2 Recovery / Conversation Binding / UX Hardening: **PLANNED**.
+
+M3.1 must build on the frozen single-round contract. This freeze does not start M3.1 or change M4/M5/M6 ownership.
 
 ## Troubleshooting
 
@@ -46,3 +59,5 @@ Do not report Desktop Skill E2E as passed until a real user completes this proce
 - An ambiguous `send` result, invalid C2C response, dirty worktree, unexpected branch, or M2 safety rejection is a stop condition.
 - `EXECUTION_RECOVERY_REQUIRED` means M3.0 cannot safely infer which plan steps already ran. Inspect and reconcile manually rather than replaying the plan.
 - At `EXECUTED`, resend the durable review envelope path returned by `chatbridge duet status`, then mark reviewing only after send succeeds.
+- At durable `REVIEWING`, a Browser wait timeout permits retrying `wait --parse` and ingest against the existing send checkpoint; it does not permit resending the review envelope or replaying Executor side effects.
+- Multiple ChatGPT tabs without an explicit current target fail closed with `CHATGPT_TAB_AMBIGUOUS`; task/conversation binding is deferred to future hardening.

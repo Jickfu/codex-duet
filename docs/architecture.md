@@ -69,20 +69,20 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 
 ## Current and planned status
 
-| Component                                          | Status                         |
-| -------------------------------------------------- | ------------------------------ |
-| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0**    |
-| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1**    |
-| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2**    |
-| Codex Skill and single-round durable orchestration | **FROZEN M3.0**                |
-| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**     |
-| Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**    |
-| `EXECUTING` crash reconciliation                   | **M3.2b DESIGN FROZEN / NEXT** |
-| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                 |
-| `submit_response` MCP return path                  | **PLANNED M4**                 |
-| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**             |
-| cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**                 |
-| Hardening, packaging, and distribution             | **PLANNED M6**                 |
+| Component                                          | Status                          |
+| -------------------------------------------------- | ------------------------------- |
+| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0**     |
+| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1**     |
+| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2**     |
+| Codex Skill and single-round durable orchestration | **FROZEN M3.0**                 |
+| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**      |
+| Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**     |
+| `EXECUTING` crash reconciliation                   | **M3.2b COMPLETE / E2E MANUAL** |
+| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                  |
+| `submit_response` MCP return path                  | **PLANNED M4**                  |
+| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**              |
+| cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**                  |
+| Hardening, packaging, and distribution             | **PLANNED M6**                  |
 
 M3 can first complete the loop in GITHUB mode. A complete LOCAL loop depends on M4 and M5.
 

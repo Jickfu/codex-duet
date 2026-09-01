@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import type { TestStatus } from '../core/domain.js';
+import type { TaskCheckpoint } from '../core/task.js';
 import { TaskIdSchema } from '../core/domain.js';
 import { ChatbridgeError } from '../core/errors.js';
 import {
@@ -18,6 +19,13 @@ import { MaxIterationsSchema, type DuetRunCheckpoint, type DuetRunCheckpointV2 }
 import { DuetRunStore } from './run-store.js';
 import type { ReviewHistoryVerifier } from './review-history-verifier.js';
 import { iterativeReviewEnvelope } from './review-envelope.js';
+import { ExecutionStore } from './execution-store.js';
+import type {
+  ExecutionWorkspaceInspector,
+  ExecutionWorkspaceState,
+} from './execution-workspace-inspector.js';
+import type { TaskOperationLockLike } from './task-operation-lock.js';
+import type { ExecutionCheckpointV1 } from './execution-checkpoint.js';
 
 export type DuetStatus = {
   taskId: string;
@@ -36,11 +44,48 @@ export type DuetStatus = {
   resume: string;
 };
 
+export type ExecutionReconciliation = {
+  taskId: string;
+  iteration: number;
+  classification:
+    | 'BASELINE_CLEAN'
+    | 'WORKTREE_IN_PROGRESS'
+    | 'TEST_EVIDENCE_REQUIRED'
+    | 'READY_FOR_PREPARE_REVIEW'
+    | 'CURRENT_ITERATION_M2_PREPARED';
+  workspaceState: 'BASELINE_CLEAN' | 'WORKTREE_IN_PROGRESS' | 'COMMITTED_CLEAN';
+  action:
+    | 'RESUME_PLAN'
+    | 'CONTINUE_EXISTING_WORKTREE'
+    | 'RECORD_HONEST_TEST_EVIDENCE'
+    | 'RUN_TESTS_AND_RECORD_CURRENT_HEAD'
+    | 'PREPARE_REVIEW'
+    | 'RESUME_EXECUTED';
+  reason?: 'TEST_EVIDENCE_STALE';
+  executionBaseRef: string;
+  head: string;
+  clean: boolean;
+  conflicted: boolean;
+  externalEffects: 'UNVERIFIED';
+  adopted?: true;
+};
+
+export type ExecutionDependencies = {
+  store: ExecutionStore;
+  inspector: ExecutionWorkspaceInspector;
+  lock: TaskOperationLockLike;
+  now?: () => string;
+};
+
 export class DuetOrchestrator {
   constructor(
-    private readonly provider: Pick<GitHubCodeProvider, 'prepareContext' | 'getReviewTarget'>,
+    private readonly provider: Pick<
+      GitHubCodeProvider,
+      'prepareContext' | 'getReviewTarget' | 'status'
+    >,
     private readonly store: DuetRunStore,
     private readonly historyVerifier: ReviewHistoryVerifier,
+    private readonly execution?: ExecutionDependencies,
   ) {}
 
   async init(
@@ -161,6 +206,10 @@ export class DuetOrchestrator {
   }
 
   async beginExecution(taskIdInput: string): Promise<DuetRunCheckpointV2> {
+    if (this.execution)
+      return this.execution.lock.withLock(this.taskId(taskIdInput), () =>
+        this.beginExecutionWithEvidence(taskIdInput),
+      );
     const run = await this.requireMutableRun(taskIdInput);
     this.requireNoHalt(run);
     this.transition(run.state, 'EXECUTING');
@@ -169,7 +218,91 @@ export class DuetOrchestrator {
     return updated;
   }
 
+  private async beginExecutionWithEvidence(taskIdInput: string): Promise<DuetRunCheckpointV2> {
+    const run = await this.requireMutableRun(taskIdInput);
+    this.requireNoHalt(run);
+    this.transition(run.state, 'EXECUTING');
+    const [planSha256, workspace] = await Promise.all([
+      this.validatedPlanSha(run),
+      this.execution!.inspector.inspect(),
+    ]);
+    const base = executionBase(run);
+    this.requireWorkspaceIdentity(run, workspace);
+    if (workspace.conflicted)
+      throw new ChatbridgeError('Worktree contains conflicts', 'EXECUTION_CONFLICTED');
+    if (!workspace.clean) throw new ChatbridgeError('Worktree must be clean', 'WORKTREE_DIRTY');
+    if (workspace.head !== base)
+      throw new ChatbridgeError('HEAD does not match execution base', 'EXECUTION_BASE_MISMATCH');
+    const existing = await this.execution!.store.read(run.taskId, run.iteration);
+    const expected = {
+      taskId: run.taskId,
+      iteration: run.iteration,
+      planSha256,
+      taskBranch: run.context.taskBranch,
+      head: base,
+    };
+    if (existing) this.requireCheckpointIdentity(existing, expected);
+    else
+      await this.execution!.store.write({
+        version: 1,
+        taskId: run.taskId,
+        iteration: run.iteration,
+        planSha256,
+        baseline: { taskBranch: run.context.taskBranch, head: base },
+        startedAt: this.now(),
+      });
+    const updated = { ...run, state: 'EXECUTING' as const, updatedAt: this.now() };
+    await this.store.write(updated);
+    return updated;
+  }
+
+  async recordTests(taskIdInput: string, status: TestStatus): Promise<ExecutionCheckpointV1> {
+    if (!this.execution)
+      throw new ChatbridgeError(
+        'Execution evidence is unavailable',
+        'EXECUTION_CHECKPOINT_MISSING',
+      );
+    return this.execution.lock.withLock(this.taskId(taskIdInput), async () => {
+      const run = await this.requireMutableRun(taskIdInput);
+      if (run.state !== 'EXECUTING')
+        throw new ChatbridgeError('Run is not EXECUTING', 'RUN_STATE_INVALID');
+      const checkpoint = await this.requireExecutionCheckpoint(run);
+      const workspace = await this.execution!.inspector.inspect();
+      this.requireWorkspaceForExecution(run, checkpoint, workspace);
+      if (!workspace.clean) throw new ChatbridgeError('Worktree must be clean', 'WORKTREE_DIRTY');
+      if (!(await this.execution!.inspector.isAncestor(executionBase(run), workspace.head)))
+        throw new ChatbridgeError(
+          'HEAD diverged from execution base',
+          'EXECUTION_HISTORY_DIVERGED',
+        );
+      const m2 = await this.provider.status(run.taskId);
+      if (isCurrentM2Evidence(m2, executionBase(run)))
+        throw new ChatbridgeError(
+          'Frozen M2 review evidence already exists',
+          'M2_REVIEW_ALREADY_PREPARED',
+        );
+      const updated: ExecutionCheckpointV1 = {
+        ...checkpoint,
+        tests: { status, head: workspace.head, recordedAt: this.now() },
+      };
+      await this.execution!.store.write(updated);
+      return updated;
+    });
+  }
+
   async prepareReview(
+    taskIdInput: string,
+    tests: TestStatus,
+    outputFile: string,
+  ): Promise<DuetRunCheckpointV2> {
+    if (this.execution)
+      return this.execution.lock.withLock(this.taskId(taskIdInput), () =>
+        this.prepareReviewUnlocked(taskIdInput, tests, outputFile),
+      );
+    return this.prepareReviewUnlocked(taskIdInput, tests, outputFile);
+  }
+
+  private async prepareReviewUnlocked(
     taskIdInput: string,
     tests: TestStatus,
     outputFile: string,
@@ -177,39 +310,34 @@ export class DuetOrchestrator {
     const run = await this.requireMutableRun(taskIdInput);
     this.requireNoHalt(run);
     this.transition(run.state, 'EXECUTED');
+    if (this.execution) await this.requirePrepareReviewEvidence(run, tests);
     const rawTarget = await this.provider.getReviewTarget(run.taskId, tests);
     if (rawTarget.mode !== 'GITHUB')
       throw new ChatbridgeError('M3.0 supports GITHUB mode only', 'MODE_MISMATCH');
     const reviewTarget = rawTarget as GitHubReviewTarget;
-    const previousReviewRef = previousReviewTarget(run)?.reviewRef;
-    if (
-      previousReviewRef &&
-      (previousReviewRef === reviewTarget.reviewRef ||
-        !(await this.historyVerifier.isAncestor(previousReviewRef, reviewTarget.reviewRef)))
-    )
-      throw new ChatbridgeError(
-        'Previous REVIEW_REF is not an ancestor of current REVIEW_REF',
-        'REVIEW_HISTORY_DIVERGED',
-      );
-    const envelope = previousReviewRef
-      ? iterativeReviewEnvelope(reviewTarget, run.iteration, previousReviewRef)
-      : githubReviewEnvelope(reviewTarget, run.iteration);
-    const current = run.iterations[run.iteration - 1]!;
-    const updated: DuetRunCheckpointV2 = {
-      ...run,
-      state: 'EXECUTED' as const,
-      iterations: [...run.iterations.slice(0, -1), { ...current, reviewTarget }],
-      updatedAt: new Date().toISOString(),
-    };
-    await this.store.writeIterationArtifact(
-      run.taskId,
-      run.iteration,
-      'review-envelope.txt',
-      envelope,
-    );
-    await this.store.write(updated);
+    const { updated, envelope } = await this.persistExecutedReview(run, reviewTarget);
     await writeFile(outputFile, envelope, 'utf8');
     return updated;
+  }
+
+  async reconcileExecution(taskIdInput: string): Promise<ExecutionReconciliation> {
+    if (!this.execution)
+      throw new ChatbridgeError(
+        'Execution evidence is unavailable',
+        'EXECUTION_CHECKPOINT_MISSING',
+      );
+    return this.execution.lock.withLock(this.taskId(taskIdInput), async () => {
+      const run = await this.requireMutableRun(taskIdInput);
+      if (run.state !== 'EXECUTING')
+        throw new ChatbridgeError('Run is not EXECUTING', 'RUN_STATE_INVALID');
+      const checkpoint = await this.requireExecutionCheckpoint(run);
+      const workspace = await this.execution!.inspector.inspect();
+      this.requireWorkspaceForExecution(run, checkpoint, workspace);
+      const base = executionBase(run);
+      const m2 = await this.provider.status(run.taskId);
+      if (isCurrentM2Evidence(m2, base)) return this.adoptCurrentM2(run, checkpoint, workspace, m2);
+      return this.classifyExecution(run, checkpoint, workspace);
+    });
   }
 
   async markReviewing(taskIdInput: string): Promise<DuetRunCheckpointV2> {
@@ -259,8 +387,269 @@ export class DuetOrchestrator {
       resume:
         run.version === 2 && run.halt
           ? 'ITERATION_LIMIT_REACHED: stop and report the configured iteration limit.'
-          : resumeInstruction(run.state),
+          : run.state === 'EXECUTING'
+            ? `Run duet reconcile-execution --task ${run.taskId} and follow its deterministic action; never replay execution blindly.`
+            : resumeInstruction(run.state),
     };
+  }
+
+  private async validatedPlanSha(run: DuetRunCheckpointV2): Promise<string> {
+    let content: string;
+    try {
+      content = await readFile(
+        this.store.iterationArtifactPath(run.taskId, run.iteration, 'plan.md'),
+        'utf8',
+      );
+    } catch {
+      throw new ChatbridgeError('Current plan artifact is unavailable', 'EXECUTION_PLAN_MISMATCH');
+    }
+    const computed = sha256(content);
+    const evidence = run.iterations[run.iteration - 1]?.plan;
+    if (!evidence)
+      throw new ChatbridgeError('Current plan evidence is unavailable', 'EXECUTION_PLAN_MISMATCH');
+    if ('sha256' in evidence && evidence.sha256 !== computed)
+      throw new ChatbridgeError('Current plan hash does not match', 'EXECUTION_PLAN_MISMATCH');
+    return computed;
+  }
+
+  private requireWorkspaceIdentity(
+    run: DuetRunCheckpointV2,
+    workspace: ExecutionWorkspaceState,
+  ): void {
+    if (workspace.branch !== run.context.taskBranch)
+      throw new ChatbridgeError(
+        'Current branch is not the task branch',
+        'EXECUTION_BRANCH_MISMATCH',
+      );
+  }
+
+  private requireCheckpointIdentity(
+    checkpoint: ExecutionCheckpointV1,
+    expected: {
+      taskId: string;
+      iteration: number;
+      planSha256: string;
+      taskBranch: string;
+      head: string;
+    },
+  ): void {
+    if (
+      checkpoint.taskId !== expected.taskId ||
+      checkpoint.iteration !== expected.iteration ||
+      checkpoint.planSha256 !== expected.planSha256 ||
+      checkpoint.baseline.taskBranch !== expected.taskBranch ||
+      checkpoint.baseline.head !== expected.head
+    )
+      throw new ChatbridgeError(
+        'Execution checkpoint identity does not match the run',
+        'EXECUTION_CHECKPOINT_INVALID',
+      );
+  }
+
+  private async requireExecutionCheckpoint(
+    run: DuetRunCheckpointV2,
+  ): Promise<ExecutionCheckpointV1> {
+    const checkpoint = await this.execution!.store.read(run.taskId, run.iteration);
+    if (!checkpoint)
+      throw new ChatbridgeError(
+        'Legacy EXECUTING run has no execution checkpoint',
+        'LEGACY_EXECUTION_RECOVERY_REQUIRED',
+      );
+    this.requireCheckpointIdentity(checkpoint, {
+      taskId: run.taskId,
+      iteration: run.iteration,
+      planSha256: await this.validatedPlanSha(run),
+      taskBranch: run.context.taskBranch,
+      head: executionBase(run),
+    });
+    return checkpoint;
+  }
+
+  private requireWorkspaceForExecution(
+    run: DuetRunCheckpointV2,
+    checkpoint: ExecutionCheckpointV1,
+    workspace: ExecutionWorkspaceState,
+  ): void {
+    this.requireWorkspaceIdentity(run, workspace);
+    if (workspace.conflicted)
+      throw new ChatbridgeError('Worktree contains conflicts', 'EXECUTION_CONFLICTED');
+    if (checkpoint.baseline.head !== executionBase(run))
+      throw new ChatbridgeError(
+        'Execution base does not match durable history',
+        'EXECUTION_BASE_MISMATCH',
+      );
+  }
+
+  private async requirePrepareReviewEvidence(
+    run: DuetRunCheckpointV2,
+    tests: TestStatus,
+  ): Promise<void> {
+    const checkpoint = await this.requireExecutionCheckpoint(run);
+    const workspace = await this.execution!.inspector.inspect();
+    this.requireWorkspaceForExecution(run, checkpoint, workspace);
+    if (!workspace.clean) throw new ChatbridgeError('Worktree must be clean', 'WORKTREE_DIRTY');
+    const base = executionBase(run);
+    if (
+      workspace.head === base ||
+      !(await this.execution!.inspector.isAncestor(base, workspace.head))
+    )
+      throw new ChatbridgeError(
+        'HEAD is not a strict descendant of execution base',
+        'EXECUTION_HISTORY_DIVERGED',
+      );
+    if (!checkpoint.tests)
+      throw new ChatbridgeError('Exact-HEAD test evidence is required', 'TEST_EVIDENCE_REQUIRED');
+    if (checkpoint.tests.head !== workspace.head)
+      throw new ChatbridgeError('Test evidence belongs to another HEAD', 'TEST_EVIDENCE_STALE');
+    if (checkpoint.tests.status !== tests)
+      throw new ChatbridgeError(
+        'CLI test status does not match durable evidence',
+        'TEST_STATUS_MISMATCH',
+      );
+    if (isCurrentM2Evidence(await this.provider.status(run.taskId), base))
+      throw new ChatbridgeError(
+        'Frozen M2 review evidence already exists; reconcile execution instead',
+        'M2_REVIEW_ALREADY_PREPARED',
+      );
+  }
+
+  private async classifyExecution(
+    run: DuetRunCheckpointV2,
+    checkpoint: ExecutionCheckpointV1,
+    workspace: ExecutionWorkspaceState,
+  ): Promise<ExecutionReconciliation> {
+    const base = executionBase(run);
+    if (
+      workspace.head !== base &&
+      !(await this.execution!.inspector.isAncestor(base, workspace.head))
+    )
+      throw new ChatbridgeError('HEAD diverged from execution base', 'EXECUTION_HISTORY_DIVERGED');
+    const common = reconciliationIdentity(run, workspace, base);
+    if (!workspace.clean)
+      return {
+        ...common,
+        classification: 'WORKTREE_IN_PROGRESS',
+        workspaceState: 'WORKTREE_IN_PROGRESS',
+        action: 'CONTINUE_EXISTING_WORKTREE',
+      };
+    if (workspace.head === base)
+      return {
+        ...common,
+        classification: 'BASELINE_CLEAN',
+        workspaceState: 'BASELINE_CLEAN',
+        action: 'RESUME_PLAN',
+      };
+    if (!checkpoint.tests)
+      return {
+        ...common,
+        classification: 'TEST_EVIDENCE_REQUIRED',
+        workspaceState: 'COMMITTED_CLEAN',
+        action: 'RECORD_HONEST_TEST_EVIDENCE',
+      };
+    if (checkpoint.tests.head !== workspace.head)
+      return {
+        ...common,
+        classification: 'TEST_EVIDENCE_REQUIRED',
+        workspaceState: 'COMMITTED_CLEAN',
+        action: 'RUN_TESTS_AND_RECORD_CURRENT_HEAD',
+        reason: 'TEST_EVIDENCE_STALE',
+      };
+    return {
+      ...common,
+      classification: 'READY_FOR_PREPARE_REVIEW',
+      workspaceState: 'COMMITTED_CLEAN',
+      action: 'PREPARE_REVIEW',
+    };
+  }
+
+  private async adoptCurrentM2(
+    run: DuetRunCheckpointV2,
+    checkpoint: ExecutionCheckpointV1,
+    workspace: ExecutionWorkspaceState,
+    evidence: TaskCheckpoint,
+  ): Promise<ExecutionReconciliation> {
+    const base = executionBase(run);
+    const diverged = () =>
+      new ChatbridgeError(
+        'Frozen M2 review evidence conflicts with execution state',
+        'M2_REVIEW_EVIDENCE_DIVERGED',
+      );
+    if (
+      evidence.mode !== 'GITHUB' ||
+      evidence.state !== 'EXECUTED' ||
+      !evidence.reviewRef ||
+      !evidence.testStatus ||
+      evidence.repository !== run.context.repository ||
+      evidence.remote !== run.context.remote ||
+      evidence.taskBranch !== run.context.taskBranch ||
+      evidence.baseRef !== run.context.baseRef ||
+      evidence.reviewRef === base ||
+      workspace.head !== evidence.reviewRef ||
+      !workspace.clean ||
+      !checkpoint.tests ||
+      checkpoint.tests.head !== evidence.reviewRef ||
+      checkpoint.tests.status !== evidence.testStatus ||
+      !(await this.execution!.inspector.isAncestor(base, evidence.reviewRef))
+    )
+      throw diverged();
+    const previousReviewRef = previousReviewTarget(run)?.reviewRef;
+    if (
+      previousReviewRef &&
+      (previousReviewRef === evidence.reviewRef ||
+        !(await this.historyVerifier.isAncestor(previousReviewRef, evidence.reviewRef)))
+    )
+      throw diverged();
+    const reviewTarget: GitHubReviewTarget = {
+      ...run.context,
+      reviewRef: evidence.reviewRef,
+      testStatus: evidence.testStatus,
+    };
+    await this.persistExecutedReview(run, reviewTarget);
+    return {
+      ...reconciliationIdentity(run, workspace, base),
+      classification: 'CURRENT_ITERATION_M2_PREPARED',
+      workspaceState: 'COMMITTED_CLEAN',
+      action: 'RESUME_EXECUTED',
+      adopted: true,
+    };
+  }
+
+  private async persistExecutedReview(
+    run: DuetRunCheckpointV2,
+    reviewTarget: GitHubReviewTarget,
+  ): Promise<{ updated: DuetRunCheckpointV2; envelope: string }> {
+    const previousReviewRef = previousReviewTarget(run)?.reviewRef;
+    if (
+      previousReviewRef &&
+      (previousReviewRef === reviewTarget.reviewRef ||
+        !(await this.historyVerifier.isAncestor(previousReviewRef, reviewTarget.reviewRef)))
+    )
+      throw new ChatbridgeError(
+        'Previous REVIEW_REF is not an ancestor of current REVIEW_REF',
+        'REVIEW_HISTORY_DIVERGED',
+      );
+    const envelope = previousReviewRef
+      ? iterativeReviewEnvelope(reviewTarget, run.iteration, previousReviewRef)
+      : githubReviewEnvelope(reviewTarget, run.iteration);
+    const current = run.iterations[run.iteration - 1]!;
+    const updated: DuetRunCheckpointV2 = {
+      ...run,
+      state: 'EXECUTED',
+      iterations: [...run.iterations.slice(0, -1), { ...current, reviewTarget }],
+      updatedAt: this.now(),
+    };
+    await this.store.writeIterationArtifact(
+      run.taskId,
+      run.iteration,
+      'review-envelope.txt',
+      envelope,
+    );
+    await this.store.write(updated);
+    return { updated, envelope };
+  }
+
+  private now(): string {
+    return this.execution?.now?.() ?? new Date().toISOString();
   }
 
   private async requireRun(taskIdInput: string): Promise<DuetRunCheckpoint> {
@@ -344,7 +733,7 @@ function resumeInstruction(state: TaskState): string {
     INIT: 'Initialization did not complete; stop and inspect the run.',
     PLANNING: 'Continue Browser Bridge wait, then ingest the planner response.',
     PLAN: 'Run duet begin-execution before modifying code.',
-    EXECUTING: 'EXECUTION_RECOVERY_REQUIRED',
+    EXECUTING: 'Run duet reconcile-execution and never replay execution blindly.',
     EXECUTED: 'Resend the durable review envelope, then mark-reviewing after send succeeds.',
     REVIEWING: 'Continue Browser Bridge wait, then ingest the reviewer response.',
     DONE: 'Run is complete; report the durable result.',
@@ -363,6 +752,45 @@ function previousReviewTarget(run: DuetRunCheckpointV2): GitHubReviewTarget | un
   return [...run.iterations.slice(0, run.iteration - 1)]
     .reverse()
     .find((record) => record.reviewTarget)?.reviewTarget;
+}
+
+function executionBase(run: DuetRunCheckpointV2): string {
+  if (run.iteration === 1) return run.context.baseRef;
+  const previous = previousReviewTarget(run);
+  if (!previous)
+    throw new ChatbridgeError(
+      'Previous iteration review evidence is unavailable',
+      'EXECUTION_BASE_MISMATCH',
+    );
+  return previous.reviewRef;
+}
+
+function isCurrentM2Evidence(evidence: TaskCheckpoint, executionBaseRef: string): boolean {
+  return (
+    evidence.mode === 'GITHUB' &&
+    evidence.state === 'EXECUTED' &&
+    Boolean(evidence.reviewRef) &&
+    evidence.reviewRef !== executionBaseRef
+  );
+}
+
+function reconciliationIdentity(
+  run: DuetRunCheckpointV2,
+  workspace: ExecutionWorkspaceState,
+  executionBaseRef: string,
+): Pick<
+  ExecutionReconciliation,
+  'taskId' | 'iteration' | 'executionBaseRef' | 'head' | 'clean' | 'conflicted' | 'externalEffects'
+> {
+  return {
+    taskId: run.taskId,
+    iteration: run.iteration,
+    executionBaseRef,
+    head: workspace.head,
+    clean: workspace.clean,
+    conflicted: workspace.conflicted,
+    externalEffects: 'UNVERIFIED',
+  };
 }
 
 function hasPlan(run: DuetRunCheckpoint): boolean {

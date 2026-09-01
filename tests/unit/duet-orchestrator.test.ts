@@ -434,7 +434,8 @@ describe('DuetOrchestrator', () => {
       state: 'EXECUTING',
       iteration: 1,
       maxIterations: 8,
-      resume: 'EXECUTION_RECOVERY_REQUIRED',
+      resume:
+        'Run duet reconcile-execution --task demo and follow its deterministic action; never replay execution blindly.',
     });
     expect(await store.read('demo')).toMatchObject({ version: 1 });
     await expect(duet.beginExecution('demo')).rejects.toMatchObject({

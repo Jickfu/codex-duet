@@ -6,6 +6,9 @@ import { GitHubCodeProvider } from '../github/github-code-provider.js';
 import { DuetOrchestrator } from '../duet/orchestrator.js';
 import { DuetRunStore } from '../duet/run-store.js';
 import { GitReviewHistoryVerifier } from '../duet/review-history-verifier.js';
+import { ExecutionStore } from '../duet/execution-store.js';
+import { GitExecutionWorkspaceInspector } from '../duet/execution-workspace-inspector.js';
+import { TaskOperationLock } from '../duet/task-operation-lock.js';
 
 function orchestrator(): DuetOrchestrator {
   const cwd = process.cwd();
@@ -15,6 +18,11 @@ function orchestrator(): DuetOrchestrator {
     new GitHubCodeProvider(git, 'origin', stateRoot),
     new DuetRunStore(stateRoot),
     new GitReviewHistoryVerifier(git),
+    {
+      store: new ExecutionStore(stateRoot),
+      inspector: new GitExecutionWorkspaceInspector(git),
+      lock: new TaskOperationLock(stateRoot),
+    },
   );
 }
 
@@ -47,6 +55,14 @@ export async function duetPrepareReview(
   output: string,
 ): Promise<void> {
   console.log(JSON.stringify(await orchestrator().prepareReview(task, tests, output), null, 2));
+}
+
+export async function duetRecordTests(task: string, status: TestStatus): Promise<void> {
+  console.log(JSON.stringify(await orchestrator().recordTests(task, status), null, 2));
+}
+
+export async function duetReconcileExecution(task: string): Promise<void> {
+  console.log(JSON.stringify(await orchestrator().reconcileExecution(task), null, 2));
 }
 
 export async function duetMarkReviewing(task: string): Promise<void> {

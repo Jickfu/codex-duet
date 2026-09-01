@@ -376,7 +376,7 @@ M3 overall remains **IN PROGRESS**. M3.2 is split into independently bounded sta
 | Sub-stage | Scope                               | Status                        |
 | --------- | ----------------------------------- | ----------------------------- |
 | M3.2a     | Task ↔ ChatGPT conversation binding | **FROZEN / DESKTOP E2E PASS** |
-| M3.2b     | `EXECUTING` crash reconciliation    | **DESIGN FROZEN / NEXT**      |
+| M3.2b     | `EXECUTING` crash reconciliation    | **COMPLETE / E2E MANUAL**     |
 | M3.2c     | Resume and Browser UX hardening     | **PLANNED**                   |
 
 M3.2a is frozen before M3.2b begins. It changes only deterministic Browser Control Plane routing. Frozen M0 C2C, legacy M1 behavior, M2 Git/ref safety, M3.0, M3.1, review identity, and automatic multi-round execution remain unchanged.
@@ -477,11 +477,11 @@ M3.2a does not implement `EXECUTING` crash reconciliation; `EXECUTING → EXECUT
 
 Design status: **Frozen**
 
-Implementation status: **Next**
+Implementation status: **Complete**
 
-Real Desktop crash E2E: **Future acceptance required**
+Real Desktop crash E2E: **MANUAL REQUIRED**
 
-M3.2b replaces blind `EXECUTION_RECOVERY_REQUIRED` handling with deterministic local reconciliation after implementation. It does not add a `RECOVERING` C2C state, change `TaskState`, upgrade Frozen `DuetRunCheckpointV2`, alter ADR-012 review identity, duplicate Frozen M2, modify M3.2a conversation binding, or change the Codex sole-Executor rule.
+M3.2b replaces blind `EXECUTION_RECOVERY_REQUIRED` handling with deterministic local reconciliation. It does not add a `RECOVERING` C2C state, change `TaskState`, upgrade Frozen `DuetRunCheckpointV2`, alter ADR-012 review identity, duplicate Frozen M2, modify M3.2a conversation binding, or change the Codex sole-Executor rule.
 
 Each iteration records an immutable execution baseline and optional exact-HEAD test evidence in:
 
@@ -493,12 +493,14 @@ Iteration 1 uses task `BASE_REF`; iteration N > 1 uses `PREVIOUS_REVIEW_REF`. Fo
 
 Crash-safe begin ordering is inspect and validate baseline, atomically write/reuse matching execution evidence, persist `EXECUTING`, return success, then allow Codex to edit. Preconditions are exact task branch, `HEAD == EXECUTION_BASE_REF`, clean conflict-free worktree, and valid current plan hash. Torn sidecar-before-state writes are reusable only on exact identity match. Legacy `EXECUTING` tasks without the sidecar return `LEGACY_EXECUTION_RECOVERY_REQUIRED`; no evidence is invented.
 
-The future public primitives are:
+The public primitives are:
 
 ```text
 chatbridge duet reconcile-execution --task <taskId>
 chatbridge duet record-tests --task <taskId> --status PASS|FAIL|NOT_RUN
 ```
+
+The implementation adds strict `ExecutionCheckpointV1` storage, atomic iteration-scoped persistence, exact durable plan verification, a read-only conflict-aware Git inspector, cross-process task-operation locking, crash-safe begin ordering, HEAD-bound test recording, prepare-review evidence enforcement, compact reconciliation output, and Frozen M2 adoption through read-only `status()` with no repush. The automated quality gate passes 224 of 224 tests, including torn begin reuse, legacy missing-sidecar handling, baseline/dirty/committed/stale classifications, normal prepare enforcement, first- and later-iteration M2 evidence handling, no-repush adoption, divergence, inspector safety, and concurrent record/reconcile/prepare serialization. This evidence does not replace the required real Desktop crash dogfood.
 
 A read-only Git inspector classifies branch, full `HEAD`, ancestry, worktree/conflict metadata, sidecar evidence, and Frozen M2 status. It never checks out, resets, cleans, stashes, commits, or pushes. One task's begin, record-tests, reconcile, and prepare-review operations require cross-process-safe serialization.
 
@@ -538,7 +540,7 @@ The external Skill validator could not run because the current Python environmen
 | M3.0      | Codex Skill + Single-Round Orchestration | **FROZEN**                    |
 | M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS** |
 | M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS** |
-| M3.2b     | `EXECUTING` Crash Reconciliation         | **DESIGN FROZEN / NEXT**      |
+| M3.2b     | `EXECUTING` Crash Reconciliation         | **COMPLETE / E2E MANUAL**     |
 | M3.2c     | Resume / Browser UX Hardening            | **PLANNED**                   |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

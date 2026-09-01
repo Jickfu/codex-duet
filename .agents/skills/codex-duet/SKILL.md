@@ -15,4 +15,8 @@ Every Planner and Reviewer Browser operation is task-aware: use `chatbridge send
 
 Stop on every deterministic rejection or ambiguous send outcome. Do not push directly; M2 `GitHubCodeProvider` owns safe push and immutable review identity.
 
+After editing, commit the candidate, run appropriate tests on that exact commit, and persist the honest result with `chatbridge duet record-tests --task <taskId> --status <status>` before `prepare-review`. A later commit makes prior test evidence stale.
+
+For durable `EXECUTING`, run `chatbridge duet reconcile-execution --task <taskId>` and follow its structured action. Resume from observable state: preserve dirty work, adopt existing commits, never infer PASS, and never blindly replay the PLAN. Conclusive Frozen M2 adoption resumes the normal `EXECUTED` flow without repush. Arbitrary external side effects remain unverified; stop rather than replaying a non-idempotent operation that Git evidence cannot prove safe.
+
 When a Reviewer returns a valid next-iteration `PLAN`, continue the review-directed correction loop yourself without asking the user to say "continue". Never start another Codex agent, CLI, SDK, daemon, or Node-based Executor loop.

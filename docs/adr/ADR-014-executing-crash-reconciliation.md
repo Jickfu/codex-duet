@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted as the M3.2b design freeze. Implementation and real Desktop crash acceptance remain next.
+Accepted design. Implementation is complete with 224 automated tests passing; real Desktop crash acceptance remains manual and required before freeze.
 
 ## Context
 

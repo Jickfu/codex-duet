@@ -6,7 +6,7 @@
 
 ChatGPT Web is the planner, architect, and reviewer. Codex Desktop is the outer orchestrator, and Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries compact control messages without feeding screenshots, DOM snapshots, chat history, repositories, or large diffs into the model context.
 
-This release includes the **Frozen M2 GitHub Mode MVP** data plane and the frozen M3.0, M3.1, and M3.2a Desktop contracts. M3.2b deterministic `EXECUTING` crash reconciliation is design-frozen and next for implementation. Local MCP, cloudflared, and PR automation are not implemented.
+This release includes the **Frozen M2 GitHub Mode MVP** data plane and the frozen M3.0, M3.1, and M3.2a Desktop contracts. M3.2b deterministic `EXECUTING` crash reconciliation is implemented, with real Desktop crash E2E still required. Local MCP, cloudflared, and PR automation are not implemented.
 
 ## Architecture summary
 
@@ -19,7 +19,7 @@ GITHUB mode → GitHub Data Plane
 LOCAL mode  → Read-only MCP Data Plane (planned M4/M5)
 ```
 
-GITHUB mode is implemented and frozen at M2. M3.0 single-round orchestration, M3.1 automatic Review/Fix, and M3.2a task-scoped conversation binding are frozen with real Desktop E2E acceptance. M3 overall remains in progress: M3.2b crash reconciliation is **DESIGN FROZEN / IMPLEMENTATION NEXT**, and M3.2c resume/Browser UX hardening is planned. M3.2b reconciles Git/worktree and explicit execution evidence without claiming exactly-once recovery for arbitrary external side effects. LOCAL MCP and `submit_response` are planned for M4; cloudflared lifecycle is planned for M5. Both modes share one C2C/state-machine/orchestration core. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), [the M3 milestone](docs/milestones/M3-durable-orchestrator.md), and [LOCAL mode](docs/local-mode.md).
+GITHUB mode is implemented and frozen at M2. M3.0 single-round orchestration, M3.1 automatic Review/Fix, and M3.2a task-scoped conversation binding are frozen with real Desktop E2E acceptance. M3 overall remains in progress: M3.2b crash reconciliation is **IMPLEMENTATION COMPLETE / DESKTOP E2E MANUAL REQUIRED**, and M3.2c resume/Browser UX hardening is planned. M3.2b reconciles Git/worktree and explicit execution evidence without claiming exactly-once recovery for arbitrary external side effects. LOCAL MCP and `submit_response` are planned for M4; cloudflared lifecycle is planned for M5. Both modes share one C2C/state-machine/orchestration core. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), [the M3 milestone](docs/milestones/M3-durable-orchestrator.md), and [LOCAL mode](docs/local-mode.md).
 
 ## Install
 

@@ -16,6 +16,8 @@ import {
   duetInit,
   duetMarkReviewing,
   duetPrepareReview,
+  duetRecordTests,
+  duetReconcileExecution,
   duetStatus,
 } from './duet.js';
 const program = new Command()
@@ -105,6 +107,19 @@ duet
   .command('begin-execution')
   .requiredOption('--task <id>')
   .action((o: { task: string }) => duetBeginExecution(o.task));
+duet
+  .command('record-tests')
+  .requiredOption('--task <id>')
+  .addOption(
+    new Option('--status <status>').choices(['PASS', 'FAIL', 'NOT_RUN']).makeOptionMandatory(),
+  )
+  .action((o: { task: string; status: 'PASS' | 'FAIL' | 'NOT_RUN' }) =>
+    duetRecordTests(o.task, o.status),
+  );
+duet
+  .command('reconcile-execution')
+  .requiredOption('--task <id>')
+  .action((o: { task: string }) => duetReconcileExecution(o.task));
 duet
   .command('prepare-review')
   .requiredOption('--task <id>')

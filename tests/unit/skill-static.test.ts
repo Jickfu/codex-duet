@@ -27,7 +27,9 @@ describe('codex-duet Skill', () => {
     expect(text).toContain('does not need to say "continue"');
     expect(text).toContain('ITERATION_LIMIT_REACHED');
     expect(text).toContain('BLOCKED');
-    expect(text).toContain('EXECUTION_RECOVERY_REQUIRED');
+    expect(text).toContain('duet reconcile-execution --task <taskId>');
+    expect(text).toContain('duet record-tests --task <taskId>');
+    expect(text).toContain('never blindly replay');
     expect(text).toContain('PREVIOUS_REVIEW_REF..REVIEW_REF');
     expect(text).not.toContain('@openai/codex-sdk');
   });

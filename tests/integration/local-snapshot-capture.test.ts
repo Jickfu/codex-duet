@@ -1,15 +1,16 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, writeFile, unlink, symlink } from 'node:fs/promises';
+import { chmod, copyFile, mkdtemp, readFile, writeFile, unlink, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitLocalSnapshotAuthority } from '../../src/local/git-snapshot-authority.js';
 import { LocalWorkspaceService } from '../../src/local/workspace-service.js';
 import { LocalEvidenceStore } from '../../src/local/evidence-store.js';
 import { LocalCodeProvider } from '../../src/local/local-code-provider.js';
 
 const execute = promisify(execFile);
+afterEach(() => vi.unstubAllEnvs());
 let root: string;
 async function git(...args: string[]) {
   return execute('git', args, { cwd: root });
@@ -25,6 +26,103 @@ beforeEach(async () => {
 });
 
 describe('real LOCAL snapshot capture', () => {
+  it('ignores alternate Git environment repository and index selection', async () => {
+    const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+    const expected = await authority.capture('demo');
+    const alternate = path.join(await mkdtemp(path.join(os.tmpdir(), 'alternate-index-')), 'index');
+    await copyFile(path.join(root, '.git', 'index'), alternate);
+    await execute('git', ['update-index', '--force-remove', 'tracked.txt'], {
+      cwd: root,
+      env: { ...process.env, GIT_INDEX_FILE: alternate },
+    });
+    vi.stubEnv('GIT_INDEX_FILE', alternate);
+    vi.stubEnv('GIT_DIR', path.join(root, 'nonexistent-git'));
+    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    vi.stubEnv('GIT_CONFIG_KEY_0', 'core.worktree');
+    vi.stubEnv('GIT_CONFIG_VALUE_0', '/invalid');
+    expect(
+      (await (await GitLocalSnapshotAuthority.open(root, 'demo')).capture('demo')).snapshotId,
+    ).toBe(expected.snapshotId);
+  }, 30000);
+
+  it.each(['--skip-worktree', '--assume-unchanged'])(
+    'rejects index semantic flag %s',
+    async (flag) => {
+      await git('update-index', flag, 'tracked.txt');
+      const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+      await expect(authority.capture('demo')).rejects.toMatchObject({
+        code: 'LOCAL_INDEX_UNSUPPORTED',
+      });
+    },
+  );
+
+  it.each(['120000', '160000'])(
+    'rejects unsupported mode %s even at a sensitive path',
+    async (mode) => {
+      const hash = (
+        await git('rev-parse', mode === '160000' ? 'HEAD' : 'HEAD:tracked.txt')
+      ).stdout.trim();
+      await git('update-index', '--add', '--cacheinfo', `${mode},${hash},.env`);
+      const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+      await expect(authority.capture('demo')).rejects.toMatchObject({
+        code: 'LOCAL_INDEX_UNSUPPORTED',
+      });
+    },
+  );
+
+  it('rejects conflict stages at an excluded sensitive path', async () => {
+    const hash = (await git('rev-parse', 'HEAD:tracked.txt')).stdout.trim();
+    await new Promise<void>((resolve, reject) => {
+      const child = execFile('git', ['update-index', '--index-info'], { cwd: root }, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+      child.stdin!.end(`100644 ${hash} 1\t.env\n100644 ${hash} 2\t.env\n`);
+    });
+    const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+    await expect(authority.capture('demo')).rejects.toMatchObject({
+      code: 'LOCAL_INDEX_UNSUPPORTED',
+    });
+  });
+
+  it('includes staged deletion, rename delete-half, and text/binary untracked additions', async () => {
+    await writeFile(path.join(root, 'rename.txt'), 'rename content\n');
+    await git('add', 'rename.txt');
+    await git('commit', '-m', 'rename baseline');
+    await git('rm', 'tracked.txt');
+    await git('mv', 'rename.txt', 'renamed.txt');
+    await writeFile(path.join(root, 'new.txt'), 'untracked text\n');
+    await writeFile(path.join(root, 'new.bin'), Buffer.from([0, 255, 1, 2, 0]));
+    const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+    const snapshot = await authority.capture('demo');
+    const diff = await new LocalWorkspaceService(authority.store).gitDiff({
+      taskId: 'demo',
+      snapshotId: snapshot.snapshotId,
+    });
+    const text = Buffer.from(diff.content, 'base64').toString();
+    expect(text).toContain('a/tracked.txt');
+    expect(text).toContain('a/rename.txt');
+    expect(text.match(/deleted file mode/g)).toHaveLength(2);
+    expect(text).toContain('+untracked text');
+    expect(text).toContain('GIT binary patch');
+    expect(text).toContain('new file mode 100644');
+  }, 30000);
+
+  it.skipIf(process.platform === 'win32')(
+    'binds untracked executable mode to snapshot identity',
+    async () => {
+      const file = path.join(root, 'new-script.sh');
+      await writeFile(file, '#!/bin/sh\nexit 0\n');
+      await chmod(file, 0o644);
+      const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+      const before = await authority.capture('demo');
+      await chmod(file, 0o755);
+      await expect(authority.assertLiveSnapshot(before.snapshotId)).rejects.toMatchObject({
+        code: 'LOCAL_BASELINE_DRIFT',
+      });
+    },
+  );
+
   it('captures a pre-existing dirty baseline without commit or remote and closes its bytes', async () => {
     await writeFile(path.join(root, 'tracked.txt'), 'dirty baseline\n');
     await writeFile(path.join(root, 'untracked.txt'), 'new file\n');

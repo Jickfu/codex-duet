@@ -6,4 +6,5 @@ export const LOCAL_LIMITS = Object.freeze({
   directoryPageEntries: 500,
   searchResults: 200,
   materializedDiffBytes: 8 * 1024 * 1024,
+  gitEnumerationBytes: 128 * 1024 * 1024,
 });

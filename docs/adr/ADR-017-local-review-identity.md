@@ -45,3 +45,11 @@ Browser responses and the disabled-by-default `submit_response` capability both 
 - M4.5: orchestration integration, crash/resume guards, local acceptance, and documentation freeze.
 
 Public remote exposure and cloudflared remain M5.
+
+## M4.5 capture constraints
+
+Capture removes inherited `GIT_*` overrides before invoking Git. V1 rejects non-normal index entries (including skip-worktree, assume-unchanged, sparse directories, conflicts, symlinks and submodules), even when their paths are excluded by the sensitive-file policy. The canonical index contains the normal-entry tag, mode, object and stage.
+
+Diff path coverage includes allowed HEAD paths and current paths, preserving staged deletions and rename deletion halves. Untracked additions are rendered by Git from isolated copies of captured bytes, including binary patches and executable mode; no live file is reread for that patch. Thus untracked executable changes affect the snapshot fingerprint without staging.
+
+Git enumeration output has an explicit 128 MiB per-command safety ceiling (separate from the 8 MiB cumulative materialized diff limit), accommodating 20,000 long path records plus index metadata. Either output overflow fails with `SNAPSHOT_LIMIT_EXCEEDED`; no truncated output is published.

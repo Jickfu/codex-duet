@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { z } from 'zod';
 import { TaskIdSchema } from '../core/domain.js';
 import { ChatbridgeError } from '../core/errors.js';
@@ -19,8 +18,8 @@ import {
 } from './snapshot-store.js';
 import { serializeLocalGitArtifact } from './workspace-service.js';
 import { createImmutableJson } from './immutable-json.js';
+import { readLocalGit } from './git-reader.js';
 
-const execute = promisify(execFile);
 const IdentitySchema = z
   .object({
     version: z.literal(1),
@@ -101,20 +100,24 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
   private async collect(): Promise<LocalSnapshotManifestV1> {
     const head = (await this.git(['rev-parse', '--verify', 'HEAD'])).trim();
     const branch = (await this.git(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-    const rawIndex = await this.git(['ls-files', '--stage', '-z']);
+    // -v exposes assume-unchanged (lowercase) and skip-worktree (S). --sparse
+    // preserves sparse-directory entries so unsupported semantics cannot be hidden.
+    const rawIndex = await this.git(['ls-files', '--stage', '-v', '--sparse', '-z']);
     const index: string[] = [];
+    const indexedNames = new Set<string>();
     for (const entry of splitNul(rawIndex)) {
       const tab = entry.indexOf('\t');
       if (tab < 0) throw new ChatbridgeError('Unsupported index record', 'LOCAL_INDEX_INVALID');
       const name = entry.slice(tab + 1);
-      if (isSensitiveWorkspacePath(name)) continue;
-      validateWorkspaceRelativePath(name);
-      if (!/^100(?:644|755) [a-f0-9]{40} 0$/.test(entry.slice(0, tab)))
+      if (!/^H 100(?:644|755) [a-f0-9]{40} 0$/.test(entry.slice(0, tab)))
         throw new ChatbridgeError(
           'Unmerged, linked, or submodule index is unsupported',
           'LOCAL_INDEX_UNSUPPORTED',
         );
+      if (isSensitiveWorkspacePath(name)) continue;
+      validateWorkspaceRelativePath(name);
       index.push(entry);
+      indexedNames.add(name);
     }
     const names = [
       ...new Set(
@@ -125,6 +128,7 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
       .sort();
     if (names.length > LOCAL_LIMITS.files) throw limit();
     const entries: LocalSnapshotManifestV1['entries'] = [];
+    const additions: { name: string; bytes: Buffer; mode: number }[] = [];
     let totalBytes = 0;
     for (const name of names) {
       validateWorkspaceRelativePath(name);
@@ -152,6 +156,7 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
       if (
         !after.isFile() ||
         before.ino !== after.ino ||
+        before.mode !== after.mode ||
         before.size !== after.size ||
         before.mtimeMs !== after.mtimeMs ||
         before.ctimeMs !== after.ctimeMs ||
@@ -164,6 +169,7 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
         bytes: bytes.length,
         blobSha256: await this.store.putBlob(bytes),
       });
+      if (!indexedNames.has(name)) additions.push({ name, bytes, mode: before.mode });
     }
     const statusRecords = splitNul(
       await this.git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']),
@@ -175,21 +181,66 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
     const status = allowedStatus.join('\0');
     const diffParts: string[] = [];
     let diffBytes = 0;
+    const diffNames = [
+      ...new Set([
+        ...names,
+        ...splitNul(await this.git(['ls-tree', '-r', '--name-only', '-z', 'HEAD'])).filter(
+          (name) => !isSensitiveWorkspacePath(name),
+        ),
+      ]),
+    ].sort();
+    for (const name of diffNames) validateWorkspaceRelativePath(name);
     // Small literal path groups avoid platform command-line limits and exclude credential paths.
-    for (let offset = 0; offset < names.length; offset += 20) {
-      const diff = await this.git([
-        'diff',
-        '--no-ext-diff',
-        '--no-textconv',
-        '--no-renames',
-        '--binary',
-        'HEAD',
-        '--',
-        ...names.slice(offset, offset + 20),
-      ]);
+    for (let offset = 0; offset < diffNames.length; offset += 20) {
+      const diff = await this.git(
+        [
+          'diff',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--no-renames',
+          '--binary',
+          'HEAD',
+          '--',
+          ...diffNames.slice(offset, offset + 20),
+        ],
+        true,
+      );
       diffBytes += Buffer.byteLength(diff);
       if (diffBytes > LOCAL_LIMITS.materializedDiffBytes) throw limit();
       diffParts.push(diff);
+    }
+    // Render additions from captured bytes, not from the mutable live worktree.
+    // Git's binary patch handles arbitrary bytes and records executable mode.
+    for (const addition of additions) {
+      const temporary = await mkdtemp(path.join(os.tmpdir(), 'chatbridge-addition-'));
+      try {
+        const file = path.join(temporary, addition.name);
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, addition.bytes);
+        await chmod(file, addition.mode & 0o111 ? 0o755 : 0o644);
+        const diff = await readLocalGit(
+          temporary,
+          [
+            'diff',
+            '--no-index',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--no-renames',
+            '--binary',
+            '--src-prefix=a/',
+            '--dst-prefix=b/',
+            '--',
+            '/dev/null',
+            addition.name,
+          ],
+          { diff: true, acceptDifference: true },
+        );
+        diffBytes += Buffer.byteLength(diff);
+        if (diffBytes > LOCAL_LIMITS.materializedDiffBytes) throw limit();
+        diffParts.push(diff);
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
+      }
     }
     const statusHash = await this.store.putBlob(
       serializeLocalGitArtifact({
@@ -203,7 +254,7 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
       serializeLocalGitArtifact({
         version: 1,
         kind: 'DIFF',
-        paths: names,
+        paths: diffNames,
         contentBase64: Buffer.from(diffParts.join('')).toString('base64'),
       }),
     );
@@ -236,32 +287,8 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
     };
   }
 
-  private async git(args: string[]): Promise<string> {
-    const result = await execute(
-      'git',
-      [
-        '--no-pager',
-        '--literal-pathspecs',
-        '-c',
-        'core.fsmonitor=false',
-        '-c',
-        'diff.external=',
-        '-c',
-        'core.quotePath=false',
-        ...args,
-      ],
-      {
-        cwd: this.root,
-        encoding: 'buffer',
-        maxBuffer: LOCAL_LIMITS.materializedDiffBytes,
-        env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
-      },
-    );
-    try {
-      return new TextDecoder('utf-8', { fatal: true }).decode(result.stdout);
-    } catch {
-      throw new ChatbridgeError('Git output is not UTF-8', 'LOCAL_GIT_ENCODING_UNSUPPORTED');
-    }
+  private git(args: string[], diff = false): Promise<string> {
+    return readLocalGit(this.root, args, { diff });
   }
 }
 

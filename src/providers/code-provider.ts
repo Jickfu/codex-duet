@@ -24,6 +24,16 @@ export type LocalReviewTarget = LocalReviewTargetV1;
 export type ReviewTarget = GitHubReviewTarget | LocalReviewTarget;
 
 export interface CodeProvider {
+  readonly mode: 'GITHUB' | 'LOCAL';
   prepareContext(taskId: string): Promise<ContextRef>;
+}
+
+export interface GitHubReviewProvider extends CodeProvider {
+  readonly mode: 'GITHUB';
   getReviewTarget(taskId: string, testStatus: TestStatus): Promise<ReviewTarget>;
+}
+
+export interface LocalReviewProvider extends CodeProvider {
+  readonly mode: 'LOCAL';
+  prepareReview(input: { taskId: string; iteration: number }): Promise<LocalReviewTarget>;
 }

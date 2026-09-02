@@ -5,7 +5,7 @@ import type { GitHubTaskCheckpoint, TaskCheckpoint } from '../core/task.js';
 import type { TestStatus } from '../core/domain.js';
 import { TaskIdSchema } from '../core/domain.js';
 import type {
-  CodeProvider,
+  GitHubReviewProvider,
   GitHubContextRef,
   GitHubReviewTarget,
 } from '../providers/code-provider.js';
@@ -24,7 +24,8 @@ export type GitHubDoctorReport = {
   task?: TaskCheckpoint;
 };
 
-export class GitHubCodeProvider implements CodeProvider {
+export class GitHubCodeProvider implements GitHubReviewProvider {
+  readonly mode = 'GITHUB' as const;
   private readonly store: TaskCheckpointStore;
 
   constructor(

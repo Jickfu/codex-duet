@@ -9,6 +9,7 @@ import { GitReviewHistoryVerifier } from '../duet/review-history-verifier.js';
 import { ExecutionStore } from '../duet/execution-store.js';
 import { GitExecutionWorkspaceInspector } from '../duet/execution-workspace-inspector.js';
 import { TaskOperationLock } from '../duet/task-operation-lock.js';
+import { TaskSpecStore } from '../duet/task-spec-store.js';
 
 function orchestrator(): DuetOrchestrator {
   const cwd = process.cwd();
@@ -23,6 +24,7 @@ function orchestrator(): DuetOrchestrator {
       inspector: new GitExecutionWorkspaceInspector(git),
       lock: new TaskOperationLock(stateRoot),
     },
+    new TaskSpecStore(stateRoot),
   );
 }
 
@@ -31,10 +33,11 @@ export async function duetInit(
   requestFile: string,
   output: string,
   maxIterations?: number,
+  taskSpecFile?: string,
 ): Promise<void> {
   console.log(
     JSON.stringify(
-      await orchestrator().init(task, requestFile, output, maxIterations ?? 8),
+      await orchestrator().init(task, requestFile, output, maxIterations ?? 8, taskSpecFile),
       null,
       2,
     ),

@@ -8,11 +8,18 @@ import { DuetOrchestrator } from '../../src/duet/orchestrator.js';
 import { DuetRunStore } from '../../src/duet/run-store.js';
 import type { DuetRunCheckpointV1 } from '../../src/duet/run.js';
 import type { GitHubContextRef, GitHubReviewTarget } from '../../src/providers/code-provider.js';
+import {
+  sha256,
+  taskSpecFingerprint,
+  type TaskSpecWithoutIntegrity,
+} from '../../src/duet/task-spec.js';
+import { TaskSpecStore } from '../../src/duet/task-spec-store.js';
 
 let temporary: string;
 let requestFile: string;
 let outputFile: string;
 let responseFile: string;
+let taskSpecFile: string;
 let store: DuetRunStore;
 let provider: {
   prepareContext: ReturnType<typeof vi.fn<(taskId: string) => Promise<GitHubContextRef>>>;
@@ -41,6 +48,7 @@ beforeEach(async () => {
   requestFile = path.join(temporary, 'request.md');
   outputFile = path.join(temporary, 'out.txt');
   responseFile = path.join(temporary, 'response.txt');
+  taskSpecFile = path.join(temporary, 'task-spec-input.json');
   await writeFile(requestFile, 'Add a harmless document.', 'utf8');
   store = new DuetRunStore(path.join(temporary, '.chatbridge'));
   provider = {
@@ -96,6 +104,57 @@ async function reachReviewing() {
 }
 
 describe('DuetOrchestrator', () => {
+  it('validates and persists a normalized TaskSpec supplied by Codex', async () => {
+    const taskSpecContent: TaskSpecWithoutIntegrity = {
+      version: 1,
+      taskId: 'demo',
+      mode: 'GITHUB',
+      objective: 'Add a harmless document.',
+      scope: { allowed: ['docs'], forbidden: ['src'] },
+      acceptanceCriteria: [
+        { id: 'must-1', requirement: 'Add the requested document', priority: 'MUST' },
+      ],
+      exactLiterals: [
+        {
+          id: 'literal-1',
+          value: 'harmless document',
+          usage: 'User wording',
+          caseSensitive: true,
+        },
+      ],
+      protocolRequirements: [],
+      context: {
+        repository: context.repository,
+        taskBranch: context.taskBranch,
+        baseRef: context.baseRef,
+      },
+      source: { rawRequestSha256: sha256('Add a harmless document.') },
+      contracts: {
+        plannerPath: 'docs/contracts/planner-v1.md',
+        reviewerPath: 'docs/contracts/reviewer-v1.md',
+        resolution: 'AT_BASE_REF',
+      },
+    };
+    const taskSpec = {
+      ...taskSpecContent,
+      integrity: { sha256: taskSpecFingerprint(taskSpecContent) },
+    };
+    await writeFile(taskSpecFile, JSON.stringify(taskSpec), 'utf8');
+    const taskSpecs = new TaskSpecStore(path.join(temporary, '.chatbridge'));
+    const compactDuet = new DuetOrchestrator(
+      provider as never,
+      store,
+      historyVerifier,
+      undefined,
+      taskSpecs,
+    );
+    await compactDuet.init('demo', requestFile, outputFile, 8, taskSpecFile);
+    expect(await taskSpecs.read('demo')).toEqual(taskSpec);
+    expect(await readFile(store.requestArtifactPath('demo'), 'utf8')).toBe(
+      'Add a harmless document.',
+    );
+  });
+
   it('initializes PLANNING once and writes a compact envelope', async () => {
     const run = await duet.init('demo', requestFile, outputFile);
     expect(run).toMatchObject({

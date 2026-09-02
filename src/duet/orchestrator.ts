@@ -21,6 +21,8 @@ import type { ReviewHistoryVerifier } from './review-history-verifier.js';
 import { iterativeReviewEnvelope } from './review-envelope.js';
 import { assertGitHubResponseIdentity } from './response-identity.js';
 import { ExecutionStore } from './execution-store.js';
+import { TaskSpecStore } from './task-spec-store.js';
+import { validateTaskSpecCandidate } from './task-spec.js';
 import type {
   ExecutionWorkspaceInspector,
   ExecutionWorkspaceState,
@@ -87,6 +89,7 @@ export class DuetOrchestrator {
     private readonly store: DuetRunStore,
     private readonly historyVerifier: ReviewHistoryVerifier,
     private readonly execution?: ExecutionDependencies,
+    private readonly taskSpecs?: TaskSpecStore,
   ) {}
 
   async init(
@@ -94,12 +97,24 @@ export class DuetOrchestrator {
     requestFile: string,
     outputFile: string,
     maxIterationsInput = 8,
+    taskSpecFile?: string,
   ): Promise<DuetRunCheckpointV2> {
     const taskId = this.taskId(taskIdInput);
     if (await this.store.read(taskId))
       throw new ChatbridgeError(`Run already exists for ${taskId}`, 'RUN_ALREADY_EXISTS');
     const request = await readFile(requestFile, 'utf8');
     if (!request.trim()) throw new ChatbridgeError('Request file is empty', 'REQUEST_EMPTY');
+    let taskSpecCandidate: unknown;
+    if (taskSpecFile) {
+      if (!this.taskSpecs)
+        throw new ChatbridgeError('TaskSpec storage is unavailable', 'TASK_SPEC_STORE_UNAVAILABLE');
+      taskSpecCandidate = JSON.parse(await readFile(taskSpecFile, 'utf8')) as unknown;
+      validateTaskSpecCandidate(taskSpecCandidate, {
+        taskId,
+        mode: 'GITHUB',
+        rawRequest: request,
+      });
+    }
     const limits = MaxIterationsSchema.safeParse(maxIterationsInput);
     if (!limits.success)
       throw new ChatbridgeError(
@@ -110,6 +125,14 @@ export class DuetOrchestrator {
     if (rawContext.mode !== 'GITHUB')
       throw new ChatbridgeError('M3.0 supports GITHUB mode only', 'MODE_MISMATCH');
     const context = rawContext as GitHubContextRef;
+    const taskSpec = taskSpecCandidate
+      ? validateTaskSpecCandidate(taskSpecCandidate, {
+          taskId,
+          mode: 'GITHUB',
+          rawRequest: request,
+          context,
+        })
+      : undefined;
     assertTransition('INIT', 'PLANNING');
     const now = new Date().toISOString();
     const run: DuetRunCheckpointV2 = {
@@ -126,6 +149,7 @@ export class DuetOrchestrator {
       updatedAt: now,
     };
     await this.store.writeRequestArtifact(taskId, request);
+    if (taskSpec) await this.taskSpecs!.create(taskSpec);
     await this.store.write(run);
     await writeFile(outputFile, planningEnvelope(run, request), 'utf8');
     return run;

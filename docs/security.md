@@ -1,5 +1,11 @@
 # Security boundary
 
+## M3.3 provider and Discussion safety
+
+New tasks select one Browser provider in an immutable local sidecar before any send. A provider mismatch fails closed and never triggers fallback. Codex Browser sends are prepared durably before UI action; uncertain confirmation records `OUTCOME_UNKNOWN` and forbids automatic replay. A confirmed send requires an allowlisted stable conversation identity.
+
+Discussion accepts only strict DiscussionResponseV1 bound to the exact task, lifecycle iteration, round, selected provider, TaskSpec fingerprint, and request fingerprint. It is capped at three rounds and cannot be parsed as C2C, transition to PLAN, or authorize workspace writes. Historical tasks without the M3.3 sidecar retain frozen behavior and are not silently migrated.
+
 Codex is the executor. ChatGPT is never authorized to mutate the local workspace, execute a command, or operate Git. Browser automation neither uses private ChatGPT APIs nor automates login, reads credentials, exports cookies/tokens, or records authentication material.
 
 The managed browser profile is isolated under `.chatbridge/profile` and excluded from Git. Normal operation stores no screenshots, DOM dumps, accessibility trees, or full chat history. Future debug artifacts must be opt-in, redacted, bounded, and kept outside published files; screenshots require a separate explicit switch.

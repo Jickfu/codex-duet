@@ -35,6 +35,7 @@ import type {
 } from './execution-workspace-inspector.js';
 import type { TaskOperationLockLike } from './task-operation-lock.js';
 import type { ExecutionCheckpointV1 } from './execution-checkpoint.js';
+import type { DiscussionService } from './discussion-service.js';
 
 export type DuetStatus = {
   taskId: string;
@@ -97,6 +98,7 @@ export class DuetOrchestrator {
     private readonly execution?: ExecutionDependencies,
     private readonly taskSpecs?: TaskSpecStore,
     private readonly taskContexts?: TaskContextStore,
+    private readonly discussion?: Pick<DiscussionService, 'assertPlannerAllowed'>,
   ) {}
 
   async init(
@@ -204,6 +206,7 @@ export class DuetOrchestrator {
   async ingest(taskIdInput: string, messageFile: string): Promise<DuetRunCheckpointV2> {
     const run = await this.requireMutableRun(taskIdInput);
     this.requireNoHalt(run);
+    if (run.state === 'PLANNING') await this.discussion?.assertPlannerAllowed(run.taskId);
     let envelope: Envelope;
     try {
       envelope = parseIngestEnvelope(await readFile(messageFile, 'utf8'));

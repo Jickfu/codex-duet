@@ -601,5 +601,8 @@ The external Skill validator could not run because the current Python environmen
 | M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS**            |
 | M3.2b     | `EXECUTING` Crash Reconciliation         | **FROZEN / REAL DESKTOP CRASH E2E PASS** |
 | M3.2c     | Compact Browser Control and Resume UX    | **FROZEN / REAL DESKTOP E2E PASS**       |
+| M3.3      | Task Interaction Policy and Discussion   | **IMPLEMENTED / ACCEPTANCE PENDING**     |
 
-M3 is **FROZEN / COMPLETE — REAL DESKTOP E2E PASS**. M4 Local Read-Only MCP Data Plane is the next planned milestone; M5 and M6 ownership is unchanged.
+M3.3 introduces a create-or-verify immutable TaskInteractionPolicyV1 before the first Browser side effect. It selects `CODEX_BROWSER` or `PLAYWRIGHT_CLI` and explicitly enables optional Discussion. Provider mismatch fails closed; historical tasks with no policy retain their frozen route. Codex Browser handoff records prepared, confirmed, or unknown send outcomes and exact conversation identity without becoming a `BrowserAutomationSession` implementation. Discussion uses its own strict contract, remains in PLANNING, is capped at three rounds, and permits final Planner ingestion only after `CONVERGED`. See [ADR-016](../adr/ADR-016-task-interaction-policy-and-discussion.md).
+
+M3.3 remains acceptance-pending until real Desktop runs pass for both providers and one Discussion-enabled task. M4 must not begin before that freeze gate.

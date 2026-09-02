@@ -19,6 +19,12 @@ import {
   duetRecordTests,
   duetReconcileExecution,
   duetStatus,
+  duetInteractionInit,
+  duetCodexBrowserPrepare,
+  duetCodexBrowserComplete,
+  duetCodexBrowserReceive,
+  duetDiscussionPrepare,
+  duetDiscussionIngest,
 } from './duet.js';
 const program = new Command()
   .name('chatbridge')
@@ -145,6 +151,66 @@ duet
   .command('status')
   .requiredOption('--task <id>')
   .action((o: { task: string }) => duetStatus(o.task));
+duet
+  .command('interaction-init')
+  .requiredOption('--task <id>')
+  .requiredOption('--policy-file <path>')
+  .action((o: { task: string; policyFile: string }) => duetInteractionInit(o.task, o.policyFile));
+duet
+  .command('codex-browser-prepare')
+  .requiredOption('--task <id>')
+  .requiredOption('--message-file <path>')
+  .addOption(
+    new Option('--kind <kind>')
+      .choices(['DISCUSSION', 'PLANNER', 'REVIEWER'])
+      .makeOptionMandatory(),
+  )
+  .requiredOption('--iteration <n>', 'lifecycle iteration', Number)
+  .option('--round <n>', 'discussion round', Number)
+  .action(
+    (o: {
+      task: string;
+      messageFile: string;
+      kind: 'DISCUSSION' | 'PLANNER' | 'REVIEWER';
+      iteration: number;
+      round?: number;
+    }) => duetCodexBrowserPrepare(o.task, o.messageFile, o.kind, o.iteration, o.round),
+  );
+duet
+  .command('codex-browser-complete')
+  .requiredOption('--task <id>')
+  .addOption(
+    new Option('--outcome <outcome>')
+      .choices(['CONFIRMED', 'OUTCOME_UNKNOWN'])
+      .makeOptionMandatory(),
+  )
+  .option('--conversation-url <url>')
+  .action(
+    (o: { task: string; outcome: 'CONFIRMED' | 'OUTCOME_UNKNOWN'; conversationUrl?: string }) =>
+      duetCodexBrowserComplete(o.task, o.outcome, o.conversationUrl),
+  );
+duet
+  .command('codex-browser-receive')
+  .requiredOption('--task <id>')
+  .requiredOption('--response-file <path>')
+  .action((o: { task: string; responseFile: string }) =>
+    duetCodexBrowserReceive(o.task, o.responseFile),
+  );
+duet
+  .command('discussion-prepare')
+  .requiredOption('--task <id>')
+  .requiredOption('--request-file <path>')
+  .requiredOption('--output <path>')
+  .action((o: { task: string; requestFile: string; output: string }) =>
+    duetDiscussionPrepare(o.task, o.requestFile, o.output),
+  );
+duet
+  .command('discussion-ingest')
+  .requiredOption('--task <id>')
+  .requiredOption('--message-file <path>')
+  .action((o: { task: string; messageFile: string }) =>
+    duetDiscussionIngest(o.task, o.messageFile),
+  );
 program
   .command('send')
   .requiredOption('--message-file <path>')

@@ -81,6 +81,7 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 | Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**                    |
 | `EXECUTING` crash reconciliation                   | **M3.2b FROZEN / REAL DESKTOP CRASH E2E PASS** |
 | Compact C2C and durable TaskSpec                   | **M3.2c FROZEN / REAL DESKTOP E2E PASS**       |
+| Immutable interaction policy and Discussion        | **M3.3 IMPLEMENTED / ACCEPTANCE PENDING**      |
 | `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                                 |
 | `submit_response` MCP return path                  | **PLANNED M4**                                 |
 | LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**                             |
@@ -123,6 +124,8 @@ Every future milestone must preserve these invariants:
 16. One active durable task binds to one ChatGPT conversation through task-scoped Browser Control Plane metadata.
 17. Task-aware Browser operations resolve exact durable conversation identity before browser connection; unscoped M1 discovery remains fail-closed and backward compatible.
 18. Conversation binding does not alter C2C, CodeProvider state, or formal review identity.
+19. A new task selects exactly one immutable Browser Control provider before Browser side effects; provider fallback is forbidden.
+20. Discussion is bounded pre-planning control traffic, never C2C and never code data.
 
 ## Recovery and token efficiency
 
@@ -135,3 +138,5 @@ The M3.2a re-frozen implementation baseline is `61f8565dda0ffc6b24c90116b648368a
 M3.2b adds no protocol state and does not upgrade Frozen `DuetRunCheckpointV2`. Its design stores iteration-scoped execution baseline and exact-HEAD test evidence in `.chatbridge/runs/<taskId>/iterations/<N>/execution.json`. A read-only inspector classifies the current Git/worktree state; dirty work and valid commits are preserved, never reset or blindly replayed. Conclusive Frozen M2 current-iteration evidence may be adopted into M3 `EXECUTED` without another push. Arbitrary external shell or network side effects remain unverified and outside any exactly-once guarantee. See [ADR-014](adr/ADR-014-executing-crash-reconciliation.md).
 
 M3.2c restores the documented compact Control Plane boundary. New tasks persist a strict normalized `TaskSpecV1` beside the raw request and pin its fingerprint plus the first Planner projection fingerprint in immutable `task-context.json`, then send bounded Planner and Reviewer projections through unchanged C2C/1. Missing or divergent Compact semantic evidence fails before M2 push and never falls back to legacy. The local TaskSpec is semantic authority; the bound conversation is only a semantic cache. Stable role policy is resolved from repository contracts at immutable `BASE_REF`. See [ADR-015](adr/ADR-015-compact-c2c-task-spec-v1.md).
+
+M3.3 adds an immutable per-task interaction policy without changing Frozen `BrowserAutomationSession`. `PLAYWRIGHT_CLI` retains that control plane; `CODEX_BROWSER` is a separately checkpointed Codex Desktop agent handoff. Optional Discussion is a strict, bounded protocol inside PLANNING and must converge before Planner authority. Historical tasks without the sidecar retain their frozen behavior. See [ADR-016](adr/ADR-016-task-interaction-policy-and-discussion.md).

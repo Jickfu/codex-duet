@@ -11,11 +11,26 @@ import { GitExecutionWorkspaceInspector } from '../duet/execution-workspace-insp
 import { TaskOperationLock } from '../duet/task-operation-lock.js';
 import { TaskSpecStore } from '../duet/task-spec-store.js';
 import { TaskContextStore } from '../duet/task-context-store.js';
+import { TaskInteractionPolicyStore } from '../duet/interaction-policy-store.js';
+import { CodexBrowserControlStore } from '../duet/codex-browser-control-store.js';
+import { InteractionService } from '../duet/interaction-service.js';
+import { DiscussionStore } from '../duet/discussion-store.js';
+import { DiscussionService } from '../duet/discussion-service.js';
+import { loadConfig } from '../config/config.js';
 
 function orchestrator(): DuetOrchestrator {
   const cwd = process.cwd();
   const stateRoot = path.join(cwd, '.chatbridge');
   const git = new GitRunner(cwd);
+  const policies = new TaskInteractionPolicyStore(stateRoot);
+  const specs = new TaskSpecStore(stateRoot);
+  const discussions = new DiscussionStore(stateRoot);
+  const discussion = new DiscussionService(
+    new DuetRunStore(stateRoot),
+    policies,
+    specs,
+    discussions,
+  );
   return new DuetOrchestrator(
     new GitHubCodeProvider(git, 'origin', stateRoot),
     new DuetRunStore(stateRoot),
@@ -25,9 +40,29 @@ function orchestrator(): DuetOrchestrator {
       inspector: new GitExecutionWorkspaceInspector(git),
       lock: new TaskOperationLock(stateRoot),
     },
-    new TaskSpecStore(stateRoot),
+    specs,
     new TaskContextStore(stateRoot),
+    discussion,
   );
+}
+
+function interactionServices() {
+  const stateRoot = path.join(process.cwd(), '.chatbridge');
+  const policies = new TaskInteractionPolicyStore(stateRoot);
+  const discussions = new DiscussionStore(stateRoot);
+  return {
+    interaction: new InteractionService(
+      policies,
+      new CodexBrowserControlStore(stateRoot),
+      loadConfig().allowedOrigins,
+    ),
+    discussion: new DiscussionService(
+      new DuetRunStore(stateRoot),
+      policies,
+      new TaskSpecStore(stateRoot),
+      discussions,
+    ),
+  };
 }
 
 export async function duetInit(
@@ -76,4 +111,74 @@ export async function duetMarkReviewing(task: string): Promise<void> {
 
 export async function duetStatus(task: string): Promise<void> {
   console.log(JSON.stringify(await orchestrator().status(task), null, 2));
+}
+
+export async function duetInteractionInit(task: string, policyFile: string): Promise<void> {
+  console.log(
+    JSON.stringify(await interactionServices().interaction.initialize(task, policyFile), null, 2),
+  );
+}
+
+export async function duetCodexBrowserPrepare(
+  task: string,
+  messageFile: string,
+  kind: 'DISCUSSION' | 'PLANNER' | 'REVIEWER',
+  iteration: number,
+  round?: number,
+): Promise<void> {
+  console.log(
+    JSON.stringify(
+      await interactionServices().interaction.prepareCodexBrowser(task, messageFile, {
+        kind,
+        iteration,
+        ...(round ? { round } : {}),
+      }),
+      null,
+      2,
+    ),
+  );
+}
+
+export async function duetCodexBrowserComplete(
+  task: string,
+  outcome: 'CONFIRMED' | 'OUTCOME_UNKNOWN',
+  conversationUrl?: string,
+): Promise<void> {
+  console.log(
+    JSON.stringify(
+      await interactionServices().interaction.completeCodexBrowser(task, outcome, conversationUrl),
+      null,
+      2,
+    ),
+  );
+}
+
+export async function duetCodexBrowserReceive(task: string, responseFile: string): Promise<void> {
+  console.log(
+    JSON.stringify(
+      await interactionServices().interaction.recordCodexBrowserResponse(task, responseFile),
+      null,
+      2,
+    ),
+  );
+}
+
+export async function duetDiscussionPrepare(
+  task: string,
+  requestFile: string,
+  output: string,
+): Promise<void> {
+  console.log(
+    JSON.stringify(
+      await interactionServices().discussion.prepare(task, requestFile, output),
+      null,
+      2,
+    ),
+  );
+}
+
+export async function duetDiscussionIngest(task: string, messageFile: string): Promise<void> {
+  console.log(
+    JSON.stringify(await interactionServices().discussion.ingest(task, messageFile), null, 2),
+  );
 }

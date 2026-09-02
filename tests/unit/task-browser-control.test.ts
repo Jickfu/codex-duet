@@ -8,6 +8,7 @@ import { ConversationReservationService } from '../../src/browser/conversation-r
 import { TaskBrowserStore } from '../../src/browser/task-browser-store.js';
 import { BridgeTimeoutError, ChatbridgeError } from '../../src/core/errors.js';
 import { DuetRunStore } from '../../src/duet/run-store.js';
+import { TaskInteractionPolicyStore } from '../../src/duet/interaction-policy-store.js';
 import type { DuetRunCheckpointV1 } from '../../src/duet/run.js';
 import {
   taskAwareSend,
@@ -109,6 +110,24 @@ afterEach(async () =>
 );
 
 describe('task-aware Browser control', () => {
+  it('refuses the Playwright path when the task selected CODEX_BROWSER', async () => {
+    const x = await fixture();
+    await x.runs.write(run('task1'));
+    const policies = new TaskInteractionPolicyStore(x.stateRoot);
+    await policies.createOrVerify({
+      version: 1,
+      taskId: 'task1',
+      browserControlProvider: 'CODEX_BROWSER',
+      discussion: { enabled: false },
+      selectedAt: new Date(0).toISOString(),
+    });
+    x.dependencies.policies = policies;
+    await expect(
+      taskAwareSend('message', 'task1', undefined, x.dependencies),
+    ).rejects.toMatchObject({ code: 'BROWSER_PROVIDER_MISMATCH' });
+    expect(x.sends).not.toHaveBeenCalled();
+  });
+
   it('rejects unknown tasks without creating an orphan sidecar', async () => {
     const x = await fixture();
     await expect(

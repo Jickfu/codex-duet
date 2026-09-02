@@ -1,5 +1,7 @@
 # Codex Desktop Skill
 
+For new M3.3 tasks the Skill persists TaskInteractionPolicyV1 before Browser work. It then uses only the selected `CODEX_BROWSER` or `PLAYWRIGHT_CLI` route. When Discussion is enabled, the Skill completes at most three separate Discussion rounds and requires convergence before it sends or ingests the final Planner envelope. The detailed commands and recovery rules are authoritative in `.agents/skills/codex-duet/references/workflow.md`.
+
 Status: **M3.0 through M3.2c Frozen; M3 complete with real Desktop E2E acceptance**
 
 Desktop E2E: **PASS**

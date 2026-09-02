@@ -8,6 +8,7 @@ import { TaskBrowserStore, type TaskBrowserBindingV1 } from '../browser/task-bro
 import { loadConfig } from '../config/config.js';
 import { ChatbridgeError } from '../core/errors.js';
 import { DuetRunStore } from '../duet/run-store.js';
+import { TaskInteractionPolicyStore } from '../duet/interaction-policy-store.js';
 import { runtime } from './runtime.js';
 
 interface ConnectedRuntime {
@@ -21,6 +22,7 @@ export interface TaskBrowserDependencies {
   allowedOrigins: readonly string[];
   store: TaskBrowserStore;
   runs: DuetRunStore;
+  policies?: TaskInteractionPolicyStore;
   lock: ConversationBindingLock;
   connect(conversationUrl?: string): Promise<ConnectedRuntime>;
   now(): string;
@@ -34,6 +36,7 @@ export function productionTaskBrowserDependencies(): TaskBrowserDependencies {
     allowedOrigins: config.allowedOrigins,
     store: new TaskBrowserStore(stateRoot),
     runs: new DuetRunStore(stateRoot),
+    policies: new TaskInteractionPolicyStore(stateRoot),
     lock: new ConversationBindingLock(stateRoot),
     connect: (conversationUrl?: string) => runtime(conversationUrl ? { conversationUrl } : {}),
     now: () => new Date().toISOString(),
@@ -46,6 +49,7 @@ export async function taskAwareSend(
   conversationUrl: string | undefined,
   dependencies: TaskBrowserDependencies = productionTaskBrowserDependencies(),
 ): Promise<void> {
+  await assertPlaywrightProvider(taskId, dependencies);
   const urls = new ConversationUrlPolicy(dependencies.allowedOrigins);
   const reservations = new ConversationReservationService(
     dependencies.store,
@@ -140,6 +144,7 @@ export async function taskAwareWait(
   timeout: number | undefined,
   dependencies: TaskBrowserDependencies = productionTaskBrowserDependencies(),
 ): Promise<string> {
+  await assertPlaywrightProvider(taskId, dependencies);
   const run = await dependencies.runs.read(taskId);
   if (!run) throw new ChatbridgeError(`Run not found for ${taskId}`, 'RUN_NOT_FOUND');
   const binding = await dependencies.store.read(taskId);
@@ -182,4 +187,16 @@ export async function taskAwareWait(
   } finally {
     await connected.connection.close();
   }
+}
+
+async function assertPlaywrightProvider(
+  taskId: string,
+  dependencies: TaskBrowserDependencies,
+): Promise<void> {
+  const policy = await dependencies.policies?.read(taskId);
+  if (policy && policy.browserControlProvider !== 'PLAYWRIGHT_CLI')
+    throw new ChatbridgeError(
+      `Task selected ${policy.browserControlProvider}; PLAYWRIGHT_CLI is unavailable for this task`,
+      'BROWSER_PROVIDER_MISMATCH',
+    );
 }

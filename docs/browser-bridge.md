@@ -1,5 +1,7 @@
 # Browser Bridge
 
+> M3.3 boundary: this document describes the `PLAYWRIGHT_CLI` provider and the Frozen `BrowserAutomationSession` control plane. `CODEX_BROWSER` is a separately checkpointed Codex Desktop handoff selected by immutable TaskInteractionPolicyV1; it does not implement this interface and cannot fall back to it. See [ADR-016](adr/ADR-016-task-interaction-policy-and-discussion.md).
+
 `BrowserAutomationSession` owns high-level deterministic operations. Library/CDP and official Agent CLI Extension/channel-CDP transports implement it without exposing `BrowserContext`, snapshots, or DOM output to callers. ChatGPT-specific rules have one shared source.
 
 Locator priority is stable IDs/data attributes, semantic roles/ARIA, then structural fallback. Sending commits only after observing the new outgoing user identity. Waiting anchors the response to that user, observes streaming markers and stop controls, and returns only non-empty stable final text. An ambiguous or unfinished response fails explicitly.

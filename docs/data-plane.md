@@ -1,5 +1,7 @@
 # Control Plane and Data Planes
 
+TaskInteractionPolicyV1 selects a Browser Control Plane provider, not a code Data Plane. Both `CODEX_BROWSER` and `PLAYWRIGHT_CLI` may carry only compact control messages. Neither may carry repository source or diffs, and provider selection cannot change GitHub or future LOCAL code authority. Optional Discussion is likewise Control Plane traffic and remains outside C2C.
+
 Status: GITHUB **IMPLEMENTED / FROZEN M2**; LOCAL **PLANNED M4/M5**
 
 The Browser Bridge is the shared Control Plane. It transports compact C2C lifecycle messages between Codex Desktop and ChatGPT Web. Code context travels through a separate, mode-specific Data Plane.

@@ -821,6 +821,82 @@ describe('Playwright CLI transport', () => {
     expect(enterPresses).toBe(0);
   });
 
+  it('allocates the remaining budget across visible candidates without starving the last one', async () => {
+    let now = 1_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let liveTrialTimeout = 0;
+    let sent = false;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const hidden = Array.from({ length: 10 }, () => ({
+      isVisible: async () => false,
+      click: vi.fn(),
+    }));
+    const disabled = Array.from({ length: 3 }, () => ({
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean; timeout?: number }) => {
+        if (options?.trial) {
+          now += options.timeout ?? 0;
+          throw new Error('not actionable');
+        }
+      },
+    }));
+    const live = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean; timeout?: number }) => {
+        if (options?.trial) {
+          liveTrialTimeout = options.timeout ?? 0;
+          return;
+        }
+        sent = true;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/fair-budget',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async (selector: string) =>
+        selector.includes('send-button')
+          ? [...hidden, ...disabled, live]
+          : [message(sent ? 'user-new' : 'user-old')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
+      waitForTimeout: async (ms: number) => {
+        now += ms;
+      },
+    };
+    try {
+      const output = await executeRestricted(
+        buildCliOperation(
+          {
+            kind: 'commit',
+            message: 'once',
+            conversationUrl: target.url(),
+            previousUserMessageId: 'user-old',
+          },
+          'https://chatgpt.com/',
+          ['https://chatgpt.com'],
+          'fair-budget',
+        ),
+        target,
+      );
+      expect(decodedOutput(output)).toMatchObject({
+        value: { outgoingUserMessageId: 'user-new' },
+      });
+      expect(liveTrialTimeout).toBe(2_000);
+      expect(hidden.every((candidate) => candidate.click.mock.calls.length === 0)).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('skips a hidden stale candidate and clicks the visible send candidate', async () => {
     let staleClicks = 0;
     let liveActualClicks = 0;

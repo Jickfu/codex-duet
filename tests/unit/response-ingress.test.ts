@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ResponseIngressService } from '../../src/duet/response-ingress.js';
+import {
+  ResponseIngressService,
+  type ResponseIngressRecordV1,
+} from '../../src/duet/response-ingress.js';
 
 describe('ResponseIngressService', () => {
   let root: string;
@@ -11,6 +14,33 @@ describe('ResponseIngressService', () => {
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'duet-ingress-'));
+  });
+
+  it('validates path identity on exclusive-publication collision', async () => {
+    const ingress = new ResponseIngressService(root, async () => undefined);
+    const expected: ResponseIngressRecordV1 = {
+      version: 1,
+      taskId: 'demo',
+      iteration: 1,
+      controlSha256,
+      responseSha256: 'a'.repeat(64),
+      source: 'MCP',
+      status: 'PENDING',
+      createdAt: '2026-09-03T00:00:00.000Z',
+    };
+    const directory = path.join(root, 'runs', 'demo', 'ingress', '1');
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      path.join(directory, `${controlSha256}.json`),
+      JSON.stringify({ ...expected, taskId: 'other' }),
+    );
+    const publication = ingress as unknown as {
+      createPending(record: ResponseIngressRecordV1): Promise<ResponseIngressRecordV1>;
+    };
+    await expect(publication.createPending(expected)).rejects.toMatchObject({
+      code: 'RESPONSE_INGRESS_INVALID',
+    });
+    expect(await readdir(directory)).toEqual([`${controlSha256}.json`]);
   });
 
   it('accepts once, makes exact replay idempotent, and rejects divergence', async () => {

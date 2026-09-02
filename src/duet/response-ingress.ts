@@ -193,7 +193,13 @@ export class ResponseIngressService {
       return record;
     } catch (error: any) {
       if (error?.code !== 'EEXIST') throw error;
-      return ResponseIngressRecordV1Schema.parse(JSON.parse(await readFile(file, 'utf8')));
+      const existing = await this.read(record);
+      if (!existing)
+        throw new ChatbridgeError(
+          'Ingress collision authority disappeared',
+          'RESPONSE_INGRESS_INVALID',
+        );
+      return existing;
     } finally {
       await unlink(temporary).catch((error: any) => {
         if (error?.code !== 'ENOENT') throw error;

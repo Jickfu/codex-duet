@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
+import { link, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TaskIdSchema } from '../core/domain.js';
 import { ChatbridgeError } from '../core/errors.js';
@@ -36,18 +36,19 @@ export class TaskOperationLock implements TaskOperationLockLike {
     };
     await mkdir(path.dirname(file), { recursive: true });
     while (Date.now() < deadline) {
+      const temporary = `${file}.${process.pid}.${randomBytes(16).toString('hex')}.tmp`;
       try {
-        const handle = await open(file, 'wx');
-        try {
-          await handle.writeFile(JSON.stringify(owner), 'utf8');
-        } finally {
-          await handle.close();
-        }
+        await writeFile(temporary, JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' });
+        await link(temporary, file);
         return owner;
       } catch (error: any) {
         if (error?.code !== 'EEXIST') throw error;
         await this.recoverDeadOwner(file);
         await new Promise((resolve) => setTimeout(resolve, 50));
+      } finally {
+        await unlink(temporary).catch((error: any) => {
+          if (error?.code !== 'ENOENT') throw error;
+        });
       }
     }
     throw new ChatbridgeError('Timed out waiting for the task operation lock', 'TASK_LOCK_TIMEOUT');

@@ -73,7 +73,7 @@ async function fixture() {
     },
   };
   await specs.createOrVerify({ ...content, integrity: { sha256: taskSpecFingerprint(content) } });
-  return { root, service: new DiscussionService(runs, policies, specs, discussions) };
+  return { root, policies, service: new DiscussionService(runs, policies, specs, discussions) };
 }
 
 describe('bounded pre-planning Discussion', () => {
@@ -94,6 +94,15 @@ describe('bounded pre-planning Discussion', () => {
     const output = path.join(x.root, 'control.json');
     await writeFile(request, 'Resolve the architecture.', 'utf8');
     const control = await x.service.prepare('demo', request, output);
+    await expect(
+      x.policies.setBeforeLock({
+        version: 1,
+        taskId: 'demo',
+        browserControlProvider: 'PLAYWRIGHT_CLI',
+        discussion: { enabled: true },
+        selectedAt: new Date(0).toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: 'INTERACTION_POLICY_IMMUTABLE' });
     await expect(x.service.prepare('demo', request, output)).rejects.toMatchObject({
       code: 'DISCUSSION_RESPONSE_PENDING',
     });

@@ -36,6 +36,7 @@ export class DiscussionService {
       throw new ChatbridgeError('Discussion requires a PLANNING run', 'DISCUSSION_STATE_INVALID');
     if (!policy?.discussion.enabled)
       throw new ChatbridgeError('Discussion is disabled for this task', 'DISCUSSION_DISABLED');
+    await this.policies.lock(taskId);
     if (!spec) throw new ChatbridgeError('Discussion requires TaskSpecV1', 'TASK_SPEC_MISSING');
     if (summary && summary.status !== 'ACTIVE')
       throw new ChatbridgeError('Discussion is already terminal', 'DISCUSSION_TERMINAL');

@@ -6,11 +6,11 @@ For a known task ID, first run `chatbridge duet status --task <taskId>`. Continu
 
 - If status contains `halt.code: ITERATION_LIMIT_REACHED`, stop and report the configured limit. Do not wait, execute, or replay a message.
 
-- `PLANNING`: finish `wait --task <taskId> --parse`, save its complete JSON output, and ingest it.
+- `PLANNING`: inspect TaskInteractionPolicyV1 and the selected provider checkpoint. `PLAYWRIGHT_CLI` finishes `wait --task <taskId> --parse`; `CODEX_BROWSER` resumes only the recorded operation: `PREPARED` may proceed to mark-attempted and one Send gesture, unresolved `ATTEMPTED`/`OUTCOME_UNKNOWN` stops without replay, `CONFIRMED` waits for and records the response, and `RESPONDED` ingests only matching bytes.
 - `PLAN`: read `currentPlanArtifact`, then begin execution and continue the current iteration.
 - `EXECUTING`: run `chatbridge duet reconcile-execution --task <taskId>` and follow its deterministic action. `BASELINE_CLEAN` resumes the same PLAN only when external actions are safe; `WORKTREE_IN_PROGRESS` preserves and continues existing work; `TEST_EVIDENCE_REQUIRED` preserves commits and obtains honest current-HEAD tests; `READY_FOR_PREPARE_REVIEW` proceeds directly; `CURRENT_ITERATION_M2_PREPARED` uses normal `EXECUTED` resume. Never reset, discard, recreate existing work, infer PASS, repush adopted M2 work, or blindly replay non-idempotent external effects.
-- `EXECUTED`: resend `currentReviewEnvelope`, then mark reviewing only after send succeeds.
-- `REVIEWING`: finish `wait --task <taskId> --parse`, save its complete JSON output, and ingest it.
+- `EXECUTED`: send `currentReviewEnvelope` through the immutable selected provider, then mark reviewing only after that provider records confirmed send. Never call Playwright commands for a CODEX_BROWSER task.
+- `REVIEWING`: receive through the selected provider. `PLAYWRIGHT_CLI` finishes `wait --task <taskId> --parse`; `CODEX_BROWSER` follows its durable checkpoint and never replays `ATTEMPTED`, `CONFIRMED`, or `OUTCOME_UNKNOWN`. Save and ingest only the provider-validated complete response.
 - `DONE`, `BLOCKED`, `FAILED`, or `CANCELLED`: stop and report it.
 
 ## New run
@@ -22,8 +22,8 @@ For a known task ID, first run `chatbridge duet status --task <taskId>`. Continu
 5. On `BLOCKED` or `FAILED`, stop. On `PLAN`, read `.chatbridge/runs/<taskId>/plan.md`, then run `chatbridge duet begin-execution --task <taskId>` before modifying code.
 6. Inspect and edit on the generated task branch, then stage and commit the candidate. Run appropriate tests on that exact committed content and record the honest result with `chatbridge duet record-tests --task <taskId> --status <status>`. Do not push, merge, open a PR, force-push, or switch to an arbitrary branch.
 7. With a clean worktree, a strict descendant commit after the iteration execution base, and matching exact-HEAD test evidence, run `chatbridge duet prepare-review --task <taskId> --tests <status> --output <review-envelope.txt>`. This composes the Frozen M2 provider; do not reproduce its Git checks or push behavior.
-8. Run `chatbridge send --task <taskId> --message-file <review-envelope.txt>`. Only after a confirmed send, run `chatbridge duet mark-reviewing --task <taskId>`.
-9. Run `chatbridge wait --task <taskId> --parse`, save the complete validated Envelope JSON output, and ingest it.
+8. Send the review envelope through TaskInteractionPolicyV1's selected provider. `PLAYWRIGHT_CLI` runs `chatbridge send --task <taskId> --message-file <review-envelope.txt>`. `CODEX_BROWSER` runs prepare, mark-attempted immediately before its one UI gesture, and complete with exact conversation identity. Only after provider-confirmed send, run `chatbridge duet mark-reviewing --task <taskId>`.
+9. Receive through the same provider. `PLAYWRIGHT_CLI` runs `chatbridge wait --task <taskId> --parse`. `CODEX_BROWSER` records the exact-conversation response and then ingests only the matching immutable response bytes. Never replay an unresolved attempted, confirmed, or unknown operation.
 10. On a valid next-iteration `PLAN` with no halt, automatically read `currentPlanArtifact` and repeat steps 5-9 as the same Codex Desktop Executor. The user does not need to say "continue".
 
 Reviewer outcomes:

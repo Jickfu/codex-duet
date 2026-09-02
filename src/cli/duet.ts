@@ -111,17 +111,22 @@ export async function duetIngest(task: string, messageFile: string): Promise<voi
   const runs = new DuetRunStore(stateRoot);
   const run = await runs.read(task);
   if (!run || run.version !== 2) throw new Error('Response ingress requires a V2 duet run');
-  const role = run.state === 'PLANNING' ? 'planner-control.txt' : 'reviewer-control.txt';
-  const control = await readFile(runs.iterationArtifactPath(task, run.iteration, role), 'utf8');
   const response = await readFile(messageFile, 'utf8');
   const duet = orchestrator();
   const ingress = new ResponseIngressService(stateRoot, async (request) => {
     await duet.ingestContent(request.taskId, request.response, true);
   });
+  const replay = await ingress.findByResponse(task, response);
+  const role = run.state === 'PLANNING' ? 'planner-control.txt' : 'reviewer-control.txt';
+  const controlSha256 =
+    replay?.controlSha256 ??
+    createHash('sha256')
+      .update(await readFile(runs.iterationArtifactPath(task, run.iteration, role), 'utf8'))
+      .digest('hex');
   const accepted = await ingress.accept({
     taskId: task,
-    iteration: run.iteration,
-    controlSha256: createHash('sha256').update(control).digest('hex'),
+    iteration: replay?.iteration ?? run.iteration,
+    controlSha256,
     response,
     source: 'BROWSER',
   });

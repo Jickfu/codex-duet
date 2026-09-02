@@ -68,4 +68,25 @@ describe('ResponseIngressService', () => {
     await expect(ingress.accept(request)).resolves.toMatchObject({ disposition: 'ACCEPTED' });
     expect(attempts).toBe(2);
   });
+
+  it('serializes independent ingress instances before lifecycle application', async () => {
+    const apply = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    const first = new ResponseIngressService(root, apply);
+    const second = new ResponseIngressService(root, apply);
+    const request = {
+      taskId: 'demo',
+      iteration: 1,
+      controlSha256,
+      response: 'same',
+      source: 'BROWSER' as const,
+    };
+    const results = await Promise.all([
+      first.accept(request),
+      second.accept({ ...request, source: 'MCP' }),
+    ]);
+    expect(results.map((result) => result.disposition).sort()).toEqual(['ACCEPTED', 'REPLAY']);
+    expect(apply).toHaveBeenCalledOnce();
+  });
 });

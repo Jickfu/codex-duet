@@ -56,7 +56,11 @@ export class LocalMcpServer {
     });
     const address = this.http.address();
     if (!address || typeof address === 'string') throw new Error('Local MCP address unavailable');
-    return { host, port: address.port, url: `http://${host}:${address.port}/mcp` };
+    return {
+      host,
+      port: address.port,
+      url: `http://${host === '::1' ? '[::1]' : host}:${address.port}/mcp`,
+    };
   }
 
   async close(): Promise<void> {
@@ -124,8 +128,16 @@ export class LocalMcpServer {
       response.writeHead(403).end();
       return;
     }
-    const length = Number(request.headers['content-length'] ?? 0);
-    if (!Number.isFinite(length) || length > LOCAL_LIMITS.readResponseBytes * 2) {
+    const rawLength = request.headers['content-length'];
+    const length = rawLength === undefined ? undefined : Number(rawLength);
+    if (
+      request.method === 'POST' &&
+      (length === undefined || !Number.isSafeInteger(length) || length <= 0)
+    ) {
+      response.writeHead(411).end();
+      return;
+    }
+    if (length !== undefined && length > LOCAL_LIMITS.readResponseBytes * 2) {
       response.writeHead(413).end();
       return;
     }
@@ -141,9 +153,10 @@ export class LocalMcpServer {
 
 function result(value: unknown) {
   const text = canonicalJson(value);
-  if (Buffer.byteLength(text) > LOCAL_LIMITS.readResponseBytes)
+  const output = { content: [{ type: 'text' as const, text }] };
+  if (Buffer.byteLength(canonicalJson(output)) > LOCAL_LIMITS.readResponseBytes)
     throw new ChatbridgeError('MCP response exceeds the bound', 'SNAPSHOT_LIMIT_EXCEEDED');
-  return { content: [{ type: 'text' as const, text }], structuredContent: value as any };
+  return output;
 }
 
 function isLoopbackHost(host: string | undefined): boolean {
@@ -156,7 +169,7 @@ function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
   try {
     const hostname = new URL(origin).hostname;
-    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]';
   } catch {
     return false;
   }

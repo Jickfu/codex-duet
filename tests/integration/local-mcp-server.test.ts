@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LocalMcpServer } from '../../src/local/mcp-server.js';
 import { LocalMcpCapabilityStore } from '../../src/local/capability-store.js';
 import { ResponseIngressService } from '../../src/duet/response-ingress.js';
+import { LOCAL_LIMITS } from '../../src/local/limits.js';
 
 const fakeWorkspace = {
   workspaceInfo: vi.fn(async (input) => ({ ...input, snapshot: { version: 1 } })),
@@ -52,7 +53,9 @@ describe('LocalMcpServer', () => {
         name: 'workspace_info',
         arguments: { taskId: 'demo', snapshotId: 'a'.repeat(64) },
       }),
-    ).resolves.toMatchObject({ structuredContent: { taskId: 'demo', snapshotId: 'a'.repeat(64) } });
+    ).resolves.toMatchObject({
+      content: [{ type: 'text', text: expect.stringContaining('"taskId":"demo"') }],
+    });
   });
 
   it('exposes submit_response only when enabled and enforces the exact capability binding', async () => {
@@ -97,5 +100,50 @@ describe('LocalMcpServer', () => {
       request.end();
     });
     expect(status).toBe(403);
+  });
+
+  it('rejects oversized chunked requests without buffering their body', async () => {
+    server = new LocalMcpServer({ workspace: fakeWorkspace as never });
+    const address = await server.start();
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      const request = httpRequest(
+        address.url,
+        { method: 'POST', headers: { 'transfer-encoding': 'chunked' } },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode);
+        },
+      );
+      request.once('error', reject);
+      request.end('x'.repeat(LOCAL_LIMITS.readResponseBytes * 3));
+    });
+    expect(status).toBe(411);
+  });
+
+  it('bounds the complete tool result including JSON escaping and wrapper overhead', async () => {
+    server = new LocalMcpServer({
+      workspace: {
+        ...fakeWorkspace,
+        readFile: async () => ({ content: '"'.repeat(LOCAL_LIMITS.readResponseBytes / 2 - 100) }),
+      } as never,
+    });
+    const address = await server.start();
+    client = new Client({ name: 'test', version: '1' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(address.url)) as Transport);
+    const result = await client.callTool({
+      name: 'read_file',
+      arguments: { taskId: 'demo', snapshotId: 'a'.repeat(64), path: 'file.txt' },
+    });
+    expect(result.isError).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(LOCAL_LIMITS.readResponseBytes);
+  });
+
+  it('returns a usable bracketed IPv6 localhost endpoint', async () => {
+    server = new LocalMcpServer({ workspace: fakeWorkspace as never, host: '::1' });
+    const address = await server.start();
+    expect(new URL(address.url).hostname).toBe('[::1]');
+    client = new Client({ name: 'test', version: '1' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(address.url)) as Transport);
+    expect((await client.listTools()).tools).toHaveLength(8);
   });
 });

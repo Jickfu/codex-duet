@@ -60,12 +60,23 @@ async function respond(
   overrides: Record<string, unknown> = {},
   format: 'raw' | 'json' = 'raw',
 ) {
+  const currentRun = await store.read('demo');
+  const currentReview =
+    currentRun?.version === 2 && currentRun.state === 'REVIEWING'
+      ? currentRun.iterations[currentRun.iteration - 1]?.reviewTarget
+      : undefined;
   const envelope = {
     version: 1,
     taskId: 'demo',
     iteration,
     state,
     mode: 'GITHUB',
+    repository: context.repository,
+    taskBranch: context.taskBranch,
+    baseRef: context.baseRef,
+    ...(currentReview
+      ? { reviewRef: currentReview.reviewRef, testStatus: currentReview.testStatus }
+      : {}),
     content: `${state} content`,
     ...overrides,
   } as Envelope;
@@ -96,6 +107,9 @@ describe('DuetOrchestrator', () => {
     expect(run.state).toBe('PLANNING');
     expect(provider.prepareContext).toHaveBeenCalledWith('demo');
     expect(await readFile(outputFile, 'utf8')).toContain('STATE: PLANNING');
+    expect(await readFile(outputFile, 'utf8')).toContain(
+      'Your response must echo TASK, MODE, REPOSITORY, TASK_BRANCH, and BASE_REF exactly',
+    );
     await expect(duet.init('demo', requestFile, outputFile)).rejects.toMatchObject({
       code: 'RUN_ALREADY_EXISTS',
     });
@@ -124,6 +138,9 @@ describe('DuetOrchestrator', () => {
     expect(provider.getReviewTarget).toHaveBeenCalledWith('demo', 'PASS');
     expect(executed.iterations[0]?.reviewTarget).toEqual(target);
     expect(executed.state).toBe('EXECUTED');
+    expect(await readFile(outputFile, 'utf8')).toContain(
+      'Your C2C response must echo MODE, REPOSITORY, TASK_BRANCH, BASE_REF, REVIEW_REF, and TEST_STATUS exactly.',
+    );
     expect((await duet.markReviewing('demo')).state).toBe('REVIEWING');
   });
   it('ingests raw C2C and parsed Envelope JSON with identical PLAN results', async () => {
@@ -146,6 +163,35 @@ describe('DuetOrchestrator', () => {
       await readFile(store.iterationArtifactPath('demo', 1, 'plan.md'), 'utf8'),
     );
   });
+  it.each([
+    ['mode', undefined, 'MODE_MISMATCH'],
+    ['repository', undefined, 'C2C_REPOSITORY_MISMATCH'],
+    ['repository', 'other/repo', 'C2C_REPOSITORY_MISMATCH'],
+    ['taskBranch', undefined, 'C2C_TASK_BRANCH_MISMATCH'],
+    ['taskBranch', 'agent/task-other', 'C2C_TASK_BRANCH_MISMATCH'],
+    ['baseRef', undefined, 'C2C_BASE_REF_MISMATCH'],
+    ['baseRef', 'e'.repeat(40), 'C2C_BASE_REF_MISMATCH'],
+  ])('rejects PLANNING response identity %s=%s before mutation', async (field, value, code) => {
+    await init();
+    await respond('PLAN', 1, { [field]: value });
+    await expect(duet.ingest('demo', responseFile)).rejects.toMatchObject({ code });
+    expect(await store.read('demo')).toMatchObject({
+      state: 'PLANNING',
+      iteration: 1,
+      iterations: [],
+    });
+    await expect(
+      readFile(store.iterationArtifactPath('demo', 1, 'plan.md'), 'utf8'),
+    ).rejects.toThrow();
+  });
+  it('applies identical missing-context rejection to parsed JSON', async () => {
+    await init();
+    await respond('PLAN', 1, { repository: undefined }, 'json');
+    await expect(duet.ingest('demo', responseFile)).rejects.toMatchObject({
+      code: 'C2C_REPOSITORY_MISMATCH',
+    });
+    expect(await store.read('demo')).toMatchObject({ state: 'PLANNING', iterations: [] });
+  });
   it.each(['PLANNING', 'REVIEWING'] as const)('accepts BLOCKED from %s', async (phase) => {
     if (phase === 'PLANNING') await init();
     else await reachReviewing();
@@ -159,6 +205,25 @@ describe('DuetOrchestrator', () => {
     await reachReviewing();
     await respond('DONE');
     expect((await duet.ingest('demo', responseFile)).state).toBe('DONE');
+  });
+  it.each([
+    ['mode', undefined, 'MODE_MISMATCH'],
+    ['mode', 'LOCAL', 'MODE_MISMATCH'],
+    ['reviewRef', undefined, 'C2C_REVIEW_REF_MISMATCH'],
+    ['reviewRef', 'e'.repeat(40), 'C2C_REVIEW_REF_MISMATCH'],
+    ['testStatus', undefined, 'C2C_TEST_STATUS_MISMATCH'],
+    ['testStatus', 'FAIL', 'C2C_TEST_STATUS_MISMATCH'],
+    ['repository', undefined, 'C2C_REPOSITORY_MISMATCH'],
+    ['repository', 'other/repo', 'C2C_REPOSITORY_MISMATCH'],
+    ['taskBranch', undefined, 'C2C_TASK_BRANCH_MISMATCH'],
+    ['taskBranch', 'agent/task-other', 'C2C_TASK_BRANCH_MISMATCH'],
+    ['baseRef', undefined, 'C2C_BASE_REF_MISMATCH'],
+    ['baseRef', 'e'.repeat(40), 'C2C_BASE_REF_MISMATCH'],
+  ])('rejects REVIEWING response identity %s=%s before mutation', async (field, value, code) => {
+    await reachReviewing();
+    await respond('DONE', 1, { [field]: value });
+    await expect(duet.ingest('demo', responseFile)).rejects.toMatchObject({ code });
+    expect(await store.read('demo')).toMatchObject({ state: 'REVIEWING', iteration: 1 });
   });
   it.each([
     ['DONE', 1],
@@ -175,6 +240,34 @@ describe('DuetOrchestrator', () => {
     await respond('PLAN', 2);
     expect(await duet.ingest('demo', responseFile)).toMatchObject({ state: 'PLAN', iteration: 2 });
   });
+  it('requires next-iteration PLAN to identify the review just completed', async () => {
+    await reachReviewing();
+    await respond('PLAN', 2, { reviewRef: target.reviewRef, testStatus: target.testStatus });
+    expect(await duet.ingest('demo', responseFile)).toMatchObject({ state: 'PLAN', iteration: 2 });
+  });
+  it('rejects a future review ref guessed by next-iteration PLAN', async () => {
+    await reachReviewing();
+    await respond('PLAN', 2, { reviewRef: target2.reviewRef });
+    await expect(duet.ingest('demo', responseFile)).rejects.toMatchObject({
+      code: 'C2C_REVIEW_REF_MISMATCH',
+    });
+    expect(await store.read('demo')).toMatchObject({ state: 'REVIEWING', iteration: 1 });
+  });
+  it.each([
+    ['PLANNING', 'BLOCKED', 'repository', undefined, 'C2C_REPOSITORY_MISMATCH'],
+    ['PLANNING', 'FAILED', 'baseRef', undefined, 'C2C_BASE_REF_MISMATCH'],
+    ['REVIEWING', 'BLOCKED', 'reviewRef', undefined, 'C2C_REVIEW_REF_MISMATCH'],
+    ['REVIEWING', 'FAILED', 'testStatus', undefined, 'C2C_TEST_STATUS_MISMATCH'],
+  ] as const)(
+    'does not let %s %s bypass identity validation',
+    async (phase, state, field, value, code) => {
+      if (phase === 'PLANNING') await init();
+      else await reachReviewing();
+      await respond(state, 1, { [field]: value });
+      await expect(duet.ingest('demo', responseFile)).rejects.toMatchObject({ code });
+      expect(await store.read('demo')).toMatchObject({ state: phase });
+    },
+  );
   it('preserves three iterations, artifacts, and cumulative review identity', async () => {
     await init();
     await respond('PLAN');
@@ -201,6 +294,9 @@ describe('DuetOrchestrator', () => {
     expect(secondEnvelope).toContain(`${context.baseRef}..${target2.reviewRef}`);
     expect(secondEnvelope).toContain(`${target.reviewRef}..${target2.reviewRef}`);
     expect(secondEnvelope).not.toContain('PREVIOUS_REVIEW_REF:');
+    expect(secondEnvelope).toContain(
+      'advance ITERATION by one but keep REVIEW_REF and TEST_STATUS equal to the review just completed',
+    );
     await duet.markReviewing('demo');
 
     await respond('PLAN', 3, { content: 'Fix finding three' });

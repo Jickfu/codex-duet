@@ -19,6 +19,7 @@ import { MaxIterationsSchema, type DuetRunCheckpoint, type DuetRunCheckpointV2 }
 import { DuetRunStore } from './run-store.js';
 import type { ReviewHistoryVerifier } from './review-history-verifier.js';
 import { iterativeReviewEnvelope } from './review-envelope.js';
+import { assertGitHubResponseIdentity } from './response-identity.js';
 import { ExecutionStore } from './execution-store.js';
 import type {
   ExecutionWorkspaceInspector,
@@ -144,8 +145,7 @@ export class DuetOrchestrator {
     }
     if (envelope.taskId !== run.taskId)
       throw new ChatbridgeError('C2C task does not match run', 'TASK_MISMATCH');
-    if (envelope.mode !== run.mode)
-      throw new ChatbridgeError('C2C mode does not match run', 'MODE_MISMATCH');
+    assertGitHubResponseIdentity(run, envelope);
     const expectedIteration =
       run.state === 'REVIEWING' && envelope.state === 'PLAN' ? run.iteration + 1 : run.iteration;
     if (envelope.iteration !== expectedIteration)
@@ -718,7 +718,9 @@ function planningEnvelope(run: DuetRunCheckpointV2, request: string): string {
       `User request:\n${request.trim()}\n\n` +
       'Return only a valid C2C/1 envelope. If implementation can proceed, return STATE: PLAN. ' +
       'If a user decision is required, return STATE: BLOCKED. Do not implement code. ' +
-      'Do not review a moving branch.',
+      'Do not review a moving branch. ' +
+      'Your response must echo TASK, MODE, REPOSITORY, TASK_BRANCH, and BASE_REF exactly from this request, ' +
+      'and must use the expected response ITERATION.',
   });
 }
 

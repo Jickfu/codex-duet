@@ -26,6 +26,8 @@ export function iterativeReviewEnvelope(
       `First inspect the iteration delta: ${deltaRange}\n` +
       `Then validate the cumulative formal range: ${formalRange}\n\n` +
       'The delta is only a review focus. The formal approval identity remains the cumulative range.\n' +
-      'Do not review moving refs.',
+      'Do not review moving refs.\n' +
+      'Your C2C response must echo the current reviewed MODE, REPOSITORY, TASK_BRANCH, BASE_REF, REVIEW_REF, and TEST_STATUS exactly.\n' +
+      'If returning PLAN for the next iteration, advance ITERATION by one but keep REVIEW_REF and TEST_STATUS equal to the review just completed; do not guess a future review ref.',
   });
 }

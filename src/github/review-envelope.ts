@@ -16,6 +16,7 @@ export function githubReviewEnvelope(target: GitHubReviewTarget, iteration = 1):
     content:
       'Review the implementation using the GitHub data plane.\n' +
       'Review exactly BASE_REF..REVIEW_REF.\n' +
-      'Do not review a moving branch head.',
+      'Do not review a moving branch head.\n' +
+      'Your C2C response must echo MODE, REPOSITORY, TASK_BRANCH, BASE_REF, REVIEW_REF, and TEST_STATUS exactly.',
   });
 }

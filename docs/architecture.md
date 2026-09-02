@@ -34,6 +34,8 @@ flowchart LR
 
 It carries `PLANNING`, `PLAN`, `EXECUTED`, `REVIEW`, `DONE`, `BLOCKED`, and compact C2C metadata. It never carries a repository archive, large diff, DOM snapshot, accessibility tree, browser storage, or other bulk code context. Browser Bridge is the Control Plane and this boundary is the Frozen M1 contract.
 
+Frozen M0 defines generic C2C syntactic validity, so GitHub context fields remain optional at that layer. M3 GITHUB orchestration adds a stricter lifecycle boundary after parsing: every Planner and Reviewer response must explicitly echo and exactly match durable task identity (`MODE`, repository, task branch, and `BASE_REF`), and Reviewer responses must also match the current durable `REVIEW_REF` and test status. Neither Browser `wait --parse` nor M3 repairs or enriches model output. Generic protocol validity and M3 lifecycle validity are intentionally distinct.
+
 The code Data Plane is mode-specific:
 
 ```mermaid

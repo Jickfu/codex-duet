@@ -31,6 +31,8 @@ Ordinary code questions do not trigger this side-effecting workflow. The Skill c
 
 The Skill asks ChatGPT Web for a PLAN through the Frozen Browser Bridge before code changes. Its canonical receive path is `chatbridge wait --parse`, save the complete validated Envelope JSON, then `chatbridge duet ingest`; raw C2C remains accepted for compatibility and diagnostics. The current Codex Desktop agent performs the implementation as the only Executor. `chatbridge duet prepare-review` composes the Frozen GitHub provider to produce and push an immutable `BASE_REF..REVIEW_REF`; ChatGPT then reviews that exact range.
 
+Generic M0 parsing is intentionally broader than M3 GITHUB lifecycle acceptance. At `duet ingest`, raw C2C and canonical parsed JSON pass through the same authoritative response-identity validation before any artifact or state mutation. Planner and Reviewer responses must echo the durable mode, repository, task branch, and `BASE_REF`; Reviewer responses must additionally echo the current reviewed `REVIEW_REF` and test status. A Reviewer `PLAN` for iteration `N+1` still identifies review `N`, not a future ref. Missing or mismatched fields fail closed and are never inferred from the run or added by Browser Bridge.
+
 No Codex CLI, Codex SDK, secondary Codex agent, daemon, or automated Codex Desktop UI control is required.
 
 ## Windows Desktop acceptance

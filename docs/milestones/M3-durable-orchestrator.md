@@ -26,7 +26,12 @@ The documentation-only dogfood `REVIEW_REF` is acceptance evidence, not the M3.0
 12. A `REVIEWING` Browser wait timeout does not authorize review-message replay or Executor side-effect replay.
 13. Durable `REVIEWING` permits a safe retry of wait and ingest against the existing send checkpoint.
 14. If the M3.0 Reviewer returns a new `PLAN`, M3 persists the next iteration but does not execute it automatically.
-15. M3.0 does not implement full `EXECUTING` crash reconciliation.
+
+### GITHUB response identity boundary
+
+M3 GITHUB orchestration requires Planner and Reviewer responses to explicitly echo and match durable task/review identity. Generic M0 C2C parsing remains intentionally broader: `EnvelopeSchema`, `parseEnvelope`, serialization, and the state machine continue to permit non-GitHub protocol use. After either raw C2C parsing or canonical `wait --parse` JSON decoding, M3 validates task, mode, repository, task branch, and immutable `BASE_REF` before iteration/state checks or any artifact/run write.
+
+While `REVIEWING`, the response must also match the current iteration's durable `reviewTarget.reviewRef` and test status. This applies equally to `DONE`, `PLAN`, `BLOCKED`, and `FAILED`. A Reviewer `PLAN` advances to iteration `N+1` while continuing to echo the `REVIEW_REF` and test status of review `N`; it never predicts the future ref. Missing values and mismatches use field-specific structured errors. Browser Bridge does not own run authority, enrich parsed output, or repair a response, and both ingest formats enforce identical lifecycle semantics. 15. M3.0 does not implement full `EXECUTING` crash reconciliation.
 
 M3.1 must extend these contracts rather than redesign the proven single-round path.
 

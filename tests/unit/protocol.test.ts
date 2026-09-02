@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { parseEnvelope, serializeEnvelope } from '../../src/core/protocol.js';
 describe('C2C/1 protocol', () => {
+  it('keeps generic M0 PLAN valid without GitHub lifecycle identity', () => {
+    expect(
+      parseEnvelope('[C2C/1]\nTASK: generic\nITERATION: 1\nSTATE: PLAN\n\nPLAN:\nproceed'),
+    ).toMatchObject({ taskId: 'generic', state: 'PLAN', content: 'proceed' });
+  });
   it('round trips an envelope', () => {
     const value = {
       version: 1 as const,

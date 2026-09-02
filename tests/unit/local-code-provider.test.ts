@@ -76,6 +76,9 @@ describe('LOCAL provider checkpoint and drift authority', () => {
     expect(second.previousReviewSnapshotId).toBe(first.reviewSnapshotId);
     await expect(provider.prepareReview({ taskId: 'demo', iteration: 2 })).resolves.toEqual(second);
     expect(captured).toHaveLength(0);
+    await expect(provider.prepareReview({ taskId: 'demo', iteration: 1 })).rejects.toMatchObject({
+      code: 'LOCAL_REVIEW_STALE',
+    });
     expect(asserted).toEqual([]);
     const resumed = new LocalCodeProvider(authority, evidence, root);
     await expect(resumed.prepareContext('demo')).resolves.toEqual(context);

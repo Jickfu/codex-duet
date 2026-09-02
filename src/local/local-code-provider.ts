@@ -124,7 +124,10 @@ export class LocalCodeProvider implements LocalReviewProvider {
     const taskId = TaskIdSchema.parse(input.taskId);
     const checkpoint = await this.requireCheckpoint(taskId);
     const iteration = z.number().int().positive().parse(input.iteration);
-    if (iteration <= checkpoint.reviews.length) return this.recoverReview(checkpoint, iteration);
+    if (iteration === checkpoint.reviews.length && checkpoint.reviews.length > 0)
+      return this.recoverReview(checkpoint, iteration);
+    if (iteration < checkpoint.reviews.length)
+      throw new ChatbridgeError('LOCAL review iteration is stale', 'LOCAL_REVIEW_STALE');
     if (iteration !== checkpoint.reviews.length + 1)
       throw new ChatbridgeError(
         'LOCAL review iteration is not sequential',

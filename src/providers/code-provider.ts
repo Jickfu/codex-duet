@@ -30,10 +30,12 @@ export interface CodeProvider {
 
 export interface GitHubReviewProvider extends CodeProvider {
   readonly mode: 'GITHUB';
-  getReviewTarget(taskId: string, testStatus: TestStatus): Promise<ReviewTarget>;
+  prepareContext(taskId: string): Promise<GitHubContextRef>;
+  getReviewTarget(taskId: string, testStatus: TestStatus): Promise<GitHubReviewTarget>;
 }
 
 export interface LocalReviewProvider extends CodeProvider {
   readonly mode: 'LOCAL';
+  prepareContext(taskId: string): Promise<LocalContextRef>;
   prepareReview(input: { taskId: string; iteration: number }): Promise<LocalReviewTarget>;
 }

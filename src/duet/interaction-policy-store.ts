@@ -1,4 +1,4 @@
-import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ChatbridgeError } from '../core/errors.js';
 import { TaskIdSchema } from '../core/domain.js';
@@ -51,8 +51,58 @@ export class TaskInteractionPolicyStore {
     }
   }
 
+  async setBeforeLock(value: TaskInteractionPolicyV1): Promise<void> {
+    const policy = TaskInteractionPolicyV1Schema.parse(value);
+    if (await this.isLocked(policy.taskId)) {
+      await this.createOrVerify(policy);
+      return;
+    }
+    const file = this.pathFor(policy.taskId);
+    await mkdir(path.dirname(file), { recursive: true });
+    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temporary, `${canonicalJson(policy)}\n`, 'utf8');
+    await rename(temporary, file);
+  }
+
+  async lock(taskIdInput: string): Promise<void> {
+    const taskId = this.taskId(taskIdInput);
+    const policy = await this.read(taskId);
+    if (!policy)
+      throw new ChatbridgeError(
+        'New task Browser control requires an interaction policy',
+        'INTERACTION_POLICY_REQUIRED',
+      );
+    const file = this.lockPath(taskId);
+    await mkdir(path.dirname(file), { recursive: true });
+    try {
+      await writeFile(file, `${canonicalJson(policy)}\n`, { encoding: 'utf8', flag: 'wx' });
+    } catch (error: any) {
+      if (error?.code !== 'EEXIST') throw error;
+      const locked = TaskInteractionPolicyV1Schema.parse(JSON.parse(await readFile(file, 'utf8')));
+      if (canonicalJson(locked) !== canonicalJson(policy))
+        throw new ChatbridgeError(
+          'Interaction policy differs from the policy locked at first control preparation',
+          'INTERACTION_POLICY_IMMUTABLE',
+        );
+    }
+  }
+
+  async isLocked(taskIdInput: string): Promise<boolean> {
+    try {
+      await readFile(this.lockPath(this.taskId(taskIdInput)), 'utf8');
+      return true;
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
   pathFor(taskIdInput: string): string {
     return path.join(this.stateRoot, 'runs', this.taskId(taskIdInput), 'interaction.json');
+  }
+
+  private lockPath(taskId: string): string {
+    return path.join(this.stateRoot, 'runs', taskId, 'interaction-lock.json');
   }
 
   private taskId(input: string): string {

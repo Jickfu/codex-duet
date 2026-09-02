@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { ChatbridgeError } from '../core/errors.js';
 import { ConversationUrlPolicy } from '../browser/conversation-url.js';
+import { ConversationReservationService } from '../browser/conversation-reservation.js';
+import type { TaskBrowserStore } from '../browser/task-browser-store.js';
+import type { ConversationBindingLock } from '../browser/conversation-binding-lock.js';
+import type { DuetRunStore } from './run-store.js';
 import { CodexBrowserControlStore } from './codex-browser-control-store.js';
 import type { CodexBrowserControlV1 } from './codex-browser-control.js';
 import { TaskInteractionPolicyStore } from './interaction-policy-store.js';
@@ -16,6 +20,11 @@ export class InteractionService {
     private readonly codexBrowser: CodexBrowserControlStore,
     private readonly allowedOrigins: string[],
     private readonly now: () => string = () => new Date().toISOString(),
+    private readonly reservations?: {
+      taskBrowser: TaskBrowserStore;
+      runs: DuetRunStore;
+      lock: ConversationBindingLock;
+    },
   ) {}
 
   async initialize(taskId: string, policyFile: string): Promise<TaskInteractionPolicyV1> {
@@ -27,7 +36,7 @@ export class InteractionService {
         'Interaction policy task ID does not match command task',
         'INTERACTION_POLICY_TASK_MISMATCH',
       );
-    await this.policies.createOrVerify(policy);
+    await this.policies.setBeforeLock(policy);
     return policy;
   }
 
@@ -53,32 +62,69 @@ export class InteractionService {
         'Codex Browser requires an explicit task interaction policy',
         'INTERACTION_POLICY_REQUIRED',
       );
+    await this.policies.lock(taskId);
     const existing = await this.codexBrowser.read(taskId);
     if (existing?.operation.state === 'OUTCOME_UNKNOWN')
       throw new ChatbridgeError(
         'Previous Codex Browser send outcome is unknown; automatic resend is forbidden',
         'CODEX_BROWSER_RESEND_FORBIDDEN',
       );
+    const content = await readFile(messageFile, 'utf8');
+    const outboundSha256 = sha256(content);
+    const operationId = sha256(JSON.stringify({ taskId, ...identity, outboundSha256 }));
+    if (existing?.operation.state === 'PREPARED' && existing.operation.operationId === operationId)
+      return existing;
     if (existing?.operation.state === 'PREPARED')
       throw new ChatbridgeError(
-        'A Codex Browser operation is already prepared; resolve it before another send',
+        'A different Codex Browser operation is already prepared',
         'CODEX_BROWSER_OPERATION_PENDING',
       );
-    const content = await readFile(messageFile, 'utf8');
+    if (existing?.operation.state === 'ATTEMPTED')
+      throw new ChatbridgeError(
+        'Previous Codex Browser send was attempted; automatic resend is forbidden',
+        'CODEX_BROWSER_RESEND_FORBIDDEN',
+      );
+    if (existing?.operation.state === 'CONFIRMED')
+      throw new ChatbridgeError(
+        'Confirmed Codex Browser operation is waiting for a response',
+        'CODEX_BROWSER_RESPONSE_PENDING',
+      );
     const checkpoint = {
       version: 1 as const,
       taskId,
       provider: 'CODEX_BROWSER' as const,
       ...(existing?.conversationUrl ? { conversationUrl: existing.conversationUrl } : {}),
       operation: {
+        operationId,
         ...identity,
-        outboundSha256: sha256(content),
+        outboundSha256,
         state: 'PREPARED' as const,
         preparedAt: this.now(),
       },
     };
     await this.codexBrowser.write(checkpoint);
     return checkpoint;
+  }
+
+  async markCodexBrowserAttempted(taskId: string): Promise<CodexBrowserControlV1> {
+    const policy = await this.requireProvider(taskId, 'CODEX_BROWSER');
+    if (!policy)
+      throw new ChatbridgeError(
+        'Codex Browser requires an explicit task interaction policy',
+        'INTERACTION_POLICY_REQUIRED',
+      );
+    const current = await this.codexBrowser.read(taskId);
+    if (!current || current.operation.state !== 'PREPARED')
+      throw new ChatbridgeError(
+        'No prepared Codex Browser operation exists',
+        'CODEX_BROWSER_OPERATION_MISSING',
+      );
+    const attempted = {
+      ...current,
+      operation: { ...current.operation, state: 'ATTEMPTED' as const },
+    };
+    await this.codexBrowser.write(attempted);
+    return attempted;
   }
 
   async completeCodexBrowser(
@@ -92,32 +138,46 @@ export class InteractionService {
         'Codex Browser requires an explicit task interaction policy',
         'INTERACTION_POLICY_REQUIRED',
       );
-    const current = await this.codexBrowser.read(taskId);
-    if (!current || current.operation.state !== 'PREPARED')
-      throw new ChatbridgeError(
-        'No prepared Codex Browser operation exists',
-        'CODEX_BROWSER_OPERATION_MISSING',
-      );
-    const canonical = conversationUrl
-      ? new ConversationUrlPolicy(this.allowedOrigins).canonicalizeStable(conversationUrl)
-      : current.conversationUrl;
-    if (outcome === 'CONFIRMED' && !canonical)
-      throw new ChatbridgeError(
-        'Confirmed Codex Browser send requires exact conversation identity',
-        'CHATGPT_CONVERSATION_IDENTITY_REQUIRED',
-      );
-    if (current.conversationUrl && canonical && current.conversationUrl !== canonical)
-      throw new ChatbridgeError(
-        'Codex Browser conversation identity changed',
-        'CHATGPT_CONVERSATION_UNAVAILABLE',
-      );
-    const completed = {
-      ...current,
-      ...(canonical ? { conversationUrl: canonical } : {}),
-      operation: { ...current.operation, state: outcome, completedAt: this.now() },
+    const complete = async () => {
+      const current = await this.codexBrowser.read(taskId);
+      if (!current || current.operation.state !== 'ATTEMPTED')
+        throw new ChatbridgeError(
+          'No attempted Codex Browser operation exists',
+          'CODEX_BROWSER_OPERATION_MISSING',
+        );
+      const urls = new ConversationUrlPolicy(this.allowedOrigins);
+      const canonical = conversationUrl
+        ? urls.canonicalizeStable(conversationUrl)
+        : current.conversationUrl;
+      if (outcome === 'CONFIRMED' && !canonical)
+        throw new ChatbridgeError(
+          'Confirmed Codex Browser send requires exact conversation identity',
+          'CHATGPT_CONVERSATION_IDENTITY_REQUIRED',
+        );
+      if (current.conversationUrl && canonical && current.conversationUrl !== canonical)
+        throw new ChatbridgeError(
+          'Codex Browser conversation identity changed',
+          'CHATGPT_CONVERSATION_UNAVAILABLE',
+        );
+      if (canonical && this.reservations) {
+        const reservations = new ConversationReservationService(
+          this.reservations.taskBrowser,
+          { getState: async (id) => (await this.reservations!.runs.read(id))?.state },
+          urls,
+          this.codexBrowser,
+        );
+        await reservations.assertTaskExists(taskId);
+        await reservations.assertAvailable(taskId, canonical, Boolean(current.conversationUrl));
+      }
+      const completed = {
+        ...current,
+        ...(canonical ? { conversationUrl: canonical } : {}),
+        operation: { ...current.operation, state: outcome, completedAt: this.now() },
+      };
+      await this.codexBrowser.write(completed);
+      return completed;
     };
-    await this.codexBrowser.write(completed);
-    return completed;
+    return this.reservations ? this.reservations.lock.withLock(complete) : complete();
   }
 
   async recordCodexBrowserResponse(
@@ -146,6 +206,7 @@ export class InteractionService {
       ...current,
       operation: {
         ...current.operation,
+        state: 'RESPONDED' as const,
         inboundSha256,
       },
     };

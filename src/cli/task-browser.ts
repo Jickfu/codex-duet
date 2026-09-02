@@ -9,6 +9,7 @@ import { loadConfig } from '../config/config.js';
 import { ChatbridgeError } from '../core/errors.js';
 import { DuetRunStore } from '../duet/run-store.js';
 import { TaskInteractionPolicyStore } from '../duet/interaction-policy-store.js';
+import { CodexBrowserControlStore } from '../duet/codex-browser-control-store.js';
 import { runtime } from './runtime.js';
 
 interface ConnectedRuntime {
@@ -23,6 +24,7 @@ export interface TaskBrowserDependencies {
   store: TaskBrowserStore;
   runs: DuetRunStore;
   policies?: TaskInteractionPolicyStore;
+  codexBrowser?: CodexBrowserControlStore;
   lock: ConversationBindingLock;
   connect(conversationUrl?: string): Promise<ConnectedRuntime>;
   now(): string;
@@ -37,6 +39,7 @@ export function productionTaskBrowserDependencies(): TaskBrowserDependencies {
     store: new TaskBrowserStore(stateRoot),
     runs: new DuetRunStore(stateRoot),
     policies: new TaskInteractionPolicyStore(stateRoot),
+    codexBrowser: new CodexBrowserControlStore(stateRoot),
     lock: new ConversationBindingLock(stateRoot),
     connect: (conversationUrl?: string) => runtime(conversationUrl ? { conversationUrl } : {}),
     now: () => new Date().toISOString(),
@@ -49,12 +52,14 @@ export async function taskAwareSend(
   conversationUrl: string | undefined,
   dependencies: TaskBrowserDependencies = productionTaskBrowserDependencies(),
 ): Promise<void> {
-  await assertPlaywrightProvider(taskId, dependencies);
+  const policy = await assertPlaywrightProvider(taskId, dependencies);
+  if (policy) await dependencies.policies!.lock(taskId);
   const urls = new ConversationUrlPolicy(dependencies.allowedOrigins);
   const reservations = new ConversationReservationService(
     dependencies.store,
     { getState: async (id) => (await dependencies.runs.read(id))?.state },
     urls,
+    dependencies.codexBrowser,
   );
   await dependencies.lock.withLock(async () => {
     await reservations.assertTaskExists(taskId);
@@ -164,6 +169,7 @@ export async function taskAwareWait(
     dependencies.store,
     { getState: async (id) => (await dependencies.runs.read(id))?.state },
     urls,
+    dependencies.codexBrowser,
   );
   await reservations.assertAvailable(taskId, target, true);
   const pending = binding.pendingSend;
@@ -192,11 +198,12 @@ export async function taskAwareWait(
 async function assertPlaywrightProvider(
   taskId: string,
   dependencies: TaskBrowserDependencies,
-): Promise<void> {
+): Promise<boolean> {
   const policy = await dependencies.policies?.read(taskId);
   if (policy && policy.browserControlProvider !== 'PLAYWRIGHT_CLI')
     throw new ChatbridgeError(
       `Task selected ${policy.browserControlProvider}; PLAYWRIGHT_CLI is unavailable for this task`,
       'BROWSER_PROVIDER_MISMATCH',
     );
+  return Boolean(policy);
 }

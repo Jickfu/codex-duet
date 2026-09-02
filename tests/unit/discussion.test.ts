@@ -8,6 +8,7 @@ import { TaskInteractionPolicyStore } from '../../src/duet/interaction-policy-st
 import { DuetRunStore } from '../../src/duet/run-store.js';
 import { TaskSpecStore } from '../../src/duet/task-spec-store.js';
 import {
+  canonicalJson,
   sha256,
   taskSpecFingerprint,
   type TaskSpecWithoutIntegrity,
@@ -103,6 +104,7 @@ describe('bounded pre-planning Discussion', () => {
         round: 1,
         provider: 'CODEX_BROWSER',
         taskSpecSha256: control.taskSpecSha256,
+        controlSha256: sha256(canonicalJson(control)),
         requestSha256: control.requestSha256,
         outcome: 'CONVERGED',
         content: 'Agreed.',
@@ -130,6 +132,7 @@ describe('bounded pre-planning Discussion', () => {
         round: 1,
         provider: 'CODEX_BROWSER',
         taskSpecSha256: control.taskSpecSha256,
+        controlSha256: sha256(canonicalJson(control)),
         requestSha256: control.requestSha256,
         outcome: 'CONVERGED',
         content: 'No.',

@@ -2,7 +2,7 @@
 
 ## M3.3 provider and Discussion safety
 
-New tasks select one Browser provider in an immutable local sidecar before any send. A provider mismatch fails closed and never triggers fallback. Codex Browser sends are prepared durably before UI action; uncertain confirmation records `OUTCOME_UNKNOWN` and forbids automatic replay. A confirmed send requires an allowlisted stable conversation identity.
+New tasks select one Browser provider in an immutable local sidecar before any send. A provider mismatch fails closed and never triggers fallback. Codex Browser sends are prepared durably, then marked `ATTEMPTED` immediately before UI action; unresolved attempts and uncertain outcomes forbid automatic replay. A confirmed send requires an allowlisted stable conversation identity reserved across both providers.
 
 Discussion accepts only strict DiscussionResponseV1 bound to the exact task, lifecycle iteration, round, selected provider, TaskSpec fingerprint, and request fingerprint. It is capped at three rounds and cannot be parsed as C2C, transition to PLAN, or authorize workspace writes. Historical tasks without the M3.3 sidecar retain frozen behavior and are not silently migrated.
 

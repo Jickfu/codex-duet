@@ -9,6 +9,7 @@ import { TaskBrowserStore } from '../../src/browser/task-browser-store.js';
 import { BridgeTimeoutError, ChatbridgeError } from '../../src/core/errors.js';
 import { DuetRunStore } from '../../src/duet/run-store.js';
 import { TaskInteractionPolicyStore } from '../../src/duet/interaction-policy-store.js';
+import { CodexBrowserControlStore } from '../../src/duet/codex-browser-control-store.js';
 import type { DuetRunCheckpointV1 } from '../../src/duet/run.js';
 import {
   taskAwareSend,
@@ -65,6 +66,7 @@ async function fixture(
   const stateRoot = await root();
   const runs = new DuetRunStore(stateRoot);
   const store = new TaskBrowserStore(stateRoot);
+  const codexBrowser = new CodexBrowserControlStore(stateRoot);
   const sends = vi.fn(async () => ({
     conversationUrl: selected,
     outgoingUserMessageId: 'user_new',
@@ -91,6 +93,7 @@ async function fixture(
     allowedOrigins: ['https://chatgpt.com'],
     store,
     runs,
+    codexBrowser,
     lock: new ConversationBindingLock(stateRoot, 5000),
     connect: async (conversationUrl) => {
       connects.push(conversationUrl);
@@ -102,7 +105,7 @@ async function fixture(
     },
     now: () => new Date(1).toISOString(),
   };
-  return { stateRoot, runs, store, sends, waits, connects, adapter, dependencies };
+  return { stateRoot, runs, store, codexBrowser, sends, waits, connects, adapter, dependencies };
 }
 
 afterEach(async () =>
@@ -110,6 +113,32 @@ afterEach(async () =>
 );
 
 describe('task-aware Browser control', () => {
+  it('shares conversation reservation with CODEX_BROWSER tasks', async () => {
+    const x = await fixture();
+    await x.runs.write(run('task1'));
+    await x.runs.write(run('owner'));
+    await x.codexBrowser.write({
+      version: 1,
+      taskId: 'owner',
+      provider: 'CODEX_BROWSER',
+      conversationUrl: 'https://chatgpt.com/c/shared',
+      operation: {
+        operationId: 'e'.repeat(64),
+        kind: 'PLANNER',
+        iteration: 1,
+        outboundSha256: 'f'.repeat(64),
+        state: 'RESPONDED',
+        preparedAt: new Date(0).toISOString(),
+        completedAt: new Date(1).toISOString(),
+        inboundSha256: 'd'.repeat(64),
+      },
+    });
+    await expect(
+      taskAwareSend('message', 'task1', 'https://chatgpt.com/c/shared', x.dependencies),
+    ).rejects.toMatchObject({ code: 'CHATGPT_CONVERSATION_ALREADY_BOUND' });
+    expect(x.sends).not.toHaveBeenCalled();
+  });
+
   it('refuses the Playwright path when the task selected CODEX_BROWSER', async () => {
     const x = await fixture();
     await x.runs.write(run('task1'));

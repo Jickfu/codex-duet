@@ -60,12 +60,35 @@ describe('task interaction policy', () => {
     });
   });
 
+  it('allows explicit policy correction only before first durable preparation', async () => {
+    const x = await fixture();
+    const first = path.join(x.root, 'first.json');
+    const second = path.join(x.root, 'second.json');
+    await writeFile(first, JSON.stringify(policy), 'utf8');
+    await writeFile(
+      second,
+      JSON.stringify({ ...policy, browserControlProvider: 'PLAYWRIGHT_CLI' }),
+      'utf8',
+    );
+    await x.service.initialize('demo', first);
+    await x.service.initialize('demo', second);
+    expect((await x.policies.read('demo'))?.browserControlProvider).toBe('PLAYWRIGHT_CLI');
+    await x.policies.lock('demo');
+    await expect(x.service.initialize('demo', first)).rejects.toMatchObject({
+      code: 'INTERACTION_POLICY_IMMUTABLE',
+    });
+  });
+
   it('checkpoints CODEX_BROWSER confirmation and forbids replay after uncertainty', async () => {
     const x = await fixture();
     await x.policies.createOrVerify(policy);
     const message = path.join(x.root, 'message.txt');
     await writeFile(message, 'hello', 'utf8');
     await x.service.prepareCodexBrowser('demo', message, { kind: 'PLANNER', iteration: 1 });
+    await expect(x.service.completeCodexBrowser('demo', 'CONFIRMED')).rejects.toMatchObject({
+      code: 'CODEX_BROWSER_OPERATION_MISSING',
+    });
+    await x.service.markCodexBrowserAttempted('demo');
     await expect(x.service.completeCodexBrowser('demo', 'CONFIRMED')).rejects.toMatchObject({
       code: 'CHATGPT_CONVERSATION_IDENTITY_REQUIRED',
     });
@@ -75,8 +98,14 @@ describe('task interaction policy', () => {
       'https://chatgpt.com/c/abc?ignored=1',
     );
     expect(confirmed.conversationUrl).toBe('https://chatgpt.com/c/abc?ignored=1');
+    const response = path.join(x.root, 'response.txt');
+    await writeFile(response, 'reply', 'utf8');
+    expect((await x.service.recordCodexBrowserResponse('demo', response)).operation.state).toBe(
+      'RESPONDED',
+    );
 
     await x.service.prepareCodexBrowser('demo', message, { kind: 'REVIEWER', iteration: 1 });
+    await x.service.markCodexBrowserAttempted('demo');
     await x.service.completeCodexBrowser('demo', 'OUTCOME_UNKNOWN');
     await expect(
       x.service.prepareCodexBrowser('demo', message, { kind: 'REVIEWER', iteration: 1 }),

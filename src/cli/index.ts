@@ -22,6 +22,7 @@ import {
   duetInteractionInit,
   duetCodexBrowserPrepare,
   duetCodexBrowserComplete,
+  duetCodexBrowserMarkAttempted,
   duetCodexBrowserReceive,
   duetDiscussionPrepare,
   duetDiscussionIngest,
@@ -99,6 +100,7 @@ duet
   .command('init')
   .requiredOption('--task <id>')
   .requiredOption('--request-file <path>')
+  .requiredOption('--interaction-policy-file <path>')
   .option('--task-spec-file <path>', 'normalized TaskSpecV1 for compact C2C')
   .requiredOption('--output <path>')
   .option('--max-iterations <n>', 'maximum review/fix iterations', Number)
@@ -106,10 +108,19 @@ duet
     (o: {
       task: string;
       requestFile: string;
+      interactionPolicyFile: string;
       taskSpecFile?: string;
       output: string;
       maxIterations?: number;
-    }) => duetInit(o.task, o.requestFile, o.output, o.maxIterations, o.taskSpecFile),
+    }) =>
+      duetInit(
+        o.task,
+        o.requestFile,
+        o.output,
+        o.interactionPolicyFile,
+        o.maxIterations,
+        o.taskSpecFile,
+      ),
   );
 duet
   .command('ingest')
@@ -176,6 +187,10 @@ duet
       round?: number;
     }) => duetCodexBrowserPrepare(o.task, o.messageFile, o.kind, o.iteration, o.round),
   );
+duet
+  .command('codex-browser-mark-attempted')
+  .requiredOption('--task <id>')
+  .action((o: { task: string }) => duetCodexBrowserMarkAttempted(o.task));
 duet
   .command('codex-browser-complete')
   .requiredOption('--task <id>')

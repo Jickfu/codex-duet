@@ -2,6 +2,7 @@ import type { TaskState } from '../core/protocol.js';
 import { ChatbridgeError } from '../core/errors.js';
 import type { TaskBrowserStore } from './task-browser-store.js';
 import type { ConversationUrlPolicy } from './conversation-url.js';
+import type { CodexBrowserControlStore } from '../duet/codex-browser-control-store.js';
 
 export interface TaskActivityResolver {
   getState(taskId: string): Promise<TaskState | undefined>;
@@ -14,6 +15,7 @@ export class ConversationReservationService {
     private readonly store: TaskBrowserStore,
     private readonly tasks: TaskActivityResolver,
     private readonly urls: ConversationUrlPolicy,
+    private readonly codexBrowser?: CodexBrowserControlStore,
   ) {}
 
   async assertTaskExists(taskId: string): Promise<TaskState> {
@@ -31,6 +33,26 @@ export class ConversationReservationService {
     for (const binding of await this.store.list()) {
       if (binding.taskId === taskId) continue;
       if (this.urls.canonicalize(binding.conversation.url) !== target) continue;
+      const state = await this.tasks.getState(binding.taskId);
+      if (!state)
+        throw new ChatbridgeError(
+          `Cannot determine owner state for conversation binding ${binding.taskId}`,
+          'CHATGPT_CONVERSATION_BINDING_OWNER_UNKNOWN',
+        );
+      if (!TERMINAL.has(state))
+        throw new ChatbridgeError(
+          'ChatGPT conversation is already bound to an active task',
+          'CHATGPT_CONVERSATION_ALREADY_BOUND',
+        );
+      if (!explicitHistoricalReuse)
+        throw new ChatbridgeError(
+          'Historical ChatGPT conversation requires explicit binding',
+          'CHATGPT_CONVERSATION_REQUIRES_EXPLICIT_BINDING',
+        );
+    }
+    for (const binding of (await this.codexBrowser?.list()) ?? []) {
+      if (binding.taskId === taskId || !binding.conversationUrl) continue;
+      if (this.urls.canonicalize(binding.conversationUrl) !== target) continue;
       const state = await this.tasks.getState(binding.taskId);
       if (!state)
         throw new ChatbridgeError(

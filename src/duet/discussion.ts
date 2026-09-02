@@ -14,6 +14,8 @@ export const DiscussionControlV1Schema = z
     round: z.number().int().min(1).max(3),
     provider: BrowserControlProviderSchema,
     taskSpecSha256: Sha256Schema,
+    interactionPolicySha256: Sha256Schema,
+    previousResponseSha256: Sha256Schema.optional(),
     requestSha256: Sha256Schema,
     content: CompactTextSchema,
   })
@@ -28,6 +30,7 @@ export const DiscussionResponseV1Schema = z
     round: z.number().int().min(1).max(3),
     provider: BrowserControlProviderSchema,
     taskSpecSha256: Sha256Schema,
+    controlSha256: Sha256Schema,
     requestSha256: Sha256Schema,
     outcome: z.enum(['CONTINUE', 'CONVERGED', 'USER_DECISION_REQUIRED', 'FAILED']),
     content: CompactTextSchema,

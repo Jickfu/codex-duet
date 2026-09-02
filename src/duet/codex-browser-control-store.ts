@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ChatbridgeError } from '../core/errors.js';
 import { TaskIdSchema } from '../core/domain.js';
@@ -35,6 +35,24 @@ export class CodexBrowserControlStore {
     const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(temporary, JSON.stringify(checkpoint, null, 2), 'utf8');
     await rename(temporary, file);
+  }
+
+  async list(): Promise<CodexBrowserControlV1[]> {
+    const runs = path.join(this.stateRoot, 'runs');
+    let entries;
+    try {
+      entries = await readdir(runs, { withFileTypes: true });
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+    const result: CodexBrowserControlV1[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const value = await this.read(entry.name);
+      if (value) result.push(value);
+    }
+    return result;
   }
 
   pathFor(taskIdInput: string): string {

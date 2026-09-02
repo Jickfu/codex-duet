@@ -17,6 +17,8 @@ import { InteractionService } from '../duet/interaction-service.js';
 import { DiscussionStore } from '../duet/discussion-store.js';
 import { DiscussionService } from '../duet/discussion-service.js';
 import { loadConfig } from '../config/config.js';
+import { TaskBrowserStore } from '../browser/task-browser-store.js';
+import { ConversationBindingLock } from '../browser/conversation-binding-lock.js';
 
 function orchestrator(): DuetOrchestrator {
   const cwd = process.cwd();
@@ -55,6 +57,12 @@ function interactionServices() {
       policies,
       new CodexBrowserControlStore(stateRoot),
       loadConfig().allowedOrigins,
+      undefined,
+      {
+        taskBrowser: new TaskBrowserStore(stateRoot),
+        runs: new DuetRunStore(stateRoot),
+        lock: new ConversationBindingLock(stateRoot),
+      },
     ),
     discussion: new DiscussionService(
       new DuetRunStore(stateRoot),
@@ -69,9 +77,22 @@ export async function duetInit(
   task: string,
   requestFile: string,
   output: string,
+  interactionPolicyFile: string,
   maxIterations?: number,
   taskSpecFile?: string,
 ): Promise<void> {
+  const existing = await new DuetRunStore(path.join(process.cwd(), '.chatbridge')).read(task);
+  if (existing) {
+    console.log(
+      JSON.stringify(
+        await orchestrator().init(task, requestFile, output, maxIterations ?? 8, taskSpecFile),
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  await interactionServices().interaction.initialize(task, interactionPolicyFile);
   console.log(
     JSON.stringify(
       await orchestrator().init(task, requestFile, output, maxIterations ?? 8, taskSpecFile),
@@ -147,6 +168,16 @@ export async function duetCodexBrowserComplete(
   console.log(
     JSON.stringify(
       await interactionServices().interaction.completeCodexBrowser(task, outcome, conversationUrl),
+      null,
+      2,
+    ),
+  );
+}
+
+export async function duetCodexBrowserMarkAttempted(task: string): Promise<void> {
+  console.log(
+    JSON.stringify(
+      await interactionServices().interaction.markCodexBrowserAttempted(task),
       null,
       2,
     ),

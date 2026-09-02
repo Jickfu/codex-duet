@@ -11,11 +11,12 @@ export const CodexBrowserControlV1Schema = z
     conversationUrl: z.string().url().optional(),
     operation: z
       .object({
+        operationId: Sha256Schema,
         kind: z.enum(['DISCUSSION', 'PLANNER', 'REVIEWER']),
         iteration: z.number().int().positive(),
         round: z.number().int().min(1).max(3).optional(),
         outboundSha256: Sha256Schema,
-        state: z.enum(['PREPARED', 'CONFIRMED', 'OUTCOME_UNKNOWN']),
+        state: z.enum(['PREPARED', 'ATTEMPTED', 'CONFIRMED', 'OUTCOME_UNKNOWN', 'RESPONDED']),
         preparedAt: z.string().datetime(),
         completedAt: z.string().datetime().optional(),
         inboundSha256: Sha256Schema.optional(),
@@ -36,13 +37,16 @@ export const CodexBrowserControlV1Schema = z
         path: ['operation', 'round'],
         message: 'round forbidden',
       });
-    if (value.operation.state !== 'PREPARED' && !value.operation.completedAt)
+    if (
+      ['CONFIRMED', 'OUTCOME_UNKNOWN', 'RESPONDED'].includes(value.operation.state) &&
+      !value.operation.completedAt
+    )
       refinement.addIssue({
         code: 'custom',
         path: ['operation', 'completedAt'],
         message: 'completedAt required',
       });
-    if (value.operation.inboundSha256 && value.operation.state !== 'CONFIRMED')
+    if (value.operation.inboundSha256 && value.operation.state !== 'RESPONDED')
       refinement.addIssue({
         code: 'custom',
         path: ['operation', 'inboundSha256'],

@@ -59,6 +59,10 @@ export class DiscussionService {
       round,
       provider: policy.browserControlProvider,
       taskSpecSha256: spec.integrity.sha256,
+      interactionPolicySha256: sha256(canonicalJson(policy)),
+      ...(summary?.rounds.at(-1)?.responseSha256
+        ? { previousResponseSha256: summary.rounds.at(-1)!.responseSha256 }
+        : {}),
       requestSha256,
       content,
     });
@@ -100,6 +104,7 @@ export class DiscussionService {
       response.round !== expected.round ||
       response.provider !== policy.browserControlProvider ||
       response.taskSpecSha256 !== spec.integrity.sha256 ||
+      response.controlSha256 !== sha256(canonicalJson(control)) ||
       response.requestSha256 !== control.requestSha256
     )
       throw new ChatbridgeError(

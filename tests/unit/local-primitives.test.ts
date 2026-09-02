@@ -1,7 +1,8 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../src/duet/task-spec.js';
 import {
   localWorkspaceSnapshotFingerprint,
   type LocalWorkspaceSnapshotWithoutId,
@@ -34,6 +35,11 @@ describe('LOCAL path and sensitive-file policy', () => {
       '\\\\server\\x',
       'a\\b',
       'NUL',
+      'NUL.',
+      'NUL ',
+      '.env.',
+      '.git.',
+      '.npmrc.',
       'x:ads',
     ])
       expect(() => validateWorkspaceRelativePath(invalid)).toThrow();
@@ -124,5 +130,70 @@ describe('LOCAL immutable snapshot store', () => {
     await expect(store.publish({ ...manifest, purpose: 'REVIEW' })).rejects.toMatchObject({
       code: 'LOCAL_SNAPSHOT_IMMUTABLE',
     });
+
+    const snapshotFile = path.join(
+      root,
+      '.chatbridge',
+      'runs',
+      'demo',
+      'local',
+      'snapshots',
+      `${snapshot.snapshotId}.json`,
+    );
+    const corrupted = {
+      ...manifest,
+      entries: [{ ...entries[0]!, path: 'src/changed.txt' }],
+    };
+    await writeFile(snapshotFile, `${canonicalJson(corrupted)}\n`);
+    await expect(store.read('demo', snapshot.snapshotId)).rejects.toMatchObject({
+      code: 'LOCAL_MANIFEST_INTEGRITY_INVALID',
+    });
+
+    const blobDirectory = path.join(root, '.chatbridge', 'local', 'blobs', fileSha.slice(0, 2));
+    expect((await readdir(blobDirectory)).some((name) => name.endsWith('.tmp'))).toBe(false);
+  });
+
+  it('rejects duplicate entries and inconsistent surface totals', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'local-manifest-'));
+    roots.push(root);
+    const store = new LocalSnapshotStore(path.join(root, '.chatbridge'));
+    const blobSha = await store.putBlob(Buffer.from('x'));
+    const entries = [
+      { path: 'a.txt', blobSha256: blobSha, bytes: 1 },
+      { path: 'a.txt', blobSha256: blobSha, bytes: 1 },
+    ];
+    const snapshotContent: LocalWorkspaceSnapshotWithoutId = {
+      version: 1,
+      kind: 'LOCAL_WORKSPACE_SNAPSHOT',
+      workspaceId: 'a'.repeat(64),
+      git: {
+        head: 'b'.repeat(40),
+        detached: true,
+        indexManifestSha256: blobSha,
+        statusSha256: blobSha,
+      },
+      surface: {
+        policyVersion: 1,
+        manifestSha256: localSnapshotSurfaceManifestFingerprint(entries),
+        fileCount: 1,
+        totalBytes: 99,
+      },
+      artifacts: { gitStatusSha256: blobSha, gitDiffSha256: blobSha },
+    };
+    const snapshot = {
+      ...snapshotContent,
+      snapshotId: localWorkspaceSnapshotFingerprint(snapshotContent),
+    };
+    await expect(
+      store.publish({
+        version: 1,
+        taskId: 'bad',
+        purpose: 'REVIEW',
+        snapshot,
+        entries,
+        gitStatusBlobSha256: blobSha,
+        gitDiffBlobSha256: blobSha,
+      }),
+    ).rejects.toMatchObject({ code: 'LOCAL_MANIFEST_INVALID' });
   });
 });

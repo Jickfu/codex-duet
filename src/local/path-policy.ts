@@ -12,7 +12,13 @@ export function validateWorkspaceRelativePath(value: string): string {
   const segments = value.split('/');
   if (
     segments.some(
-      (segment) => !segment || segment === '.' || segment === '..' || DEVICE_NAMES.test(segment),
+      (segment) =>
+        !segment ||
+        segment === '.' ||
+        segment === '..' ||
+        segment.endsWith('.') ||
+        segment.endsWith(' ') ||
+        DEVICE_NAMES.test(segment),
     )
   )
     throw invalidPath();

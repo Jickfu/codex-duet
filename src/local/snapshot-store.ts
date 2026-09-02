@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { link, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { ChatbridgeError } from '../core/errors.js';
@@ -10,6 +10,7 @@ import {
   Sha256Schema,
   validateLocalWorkspaceSnapshotIntegrity,
 } from './domain.js';
+import { validateWorkspaceRelativePath } from './path-policy.js';
 
 const SnapshotEntrySchema = z
   .object({
@@ -45,50 +46,36 @@ export class LocalSnapshotStore {
     const digest = hashBytes(bytes);
     const file = this.blobPath(digest);
     await mkdir(path.dirname(file), { recursive: true });
+    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
     try {
-      await writeFile(file, bytes, { flag: 'wx' });
+      await writeFile(temporary, bytes, { flag: 'wx' });
+      await link(temporary, file);
     } catch (error: any) {
       if (error?.code !== 'EEXIST') throw error;
       const existing = await readFile(file);
       if (!existing.equals(bytes))
         throw new ChatbridgeError('Content-addressed blob collision', 'LOCAL_BLOB_COLLISION');
+    } finally {
+      await unlink(temporary).catch((error: any) => {
+        if (error?.code !== 'ENOENT') throw error;
+      });
     }
     return digest;
   }
 
   async publish(manifest: LocalSnapshotManifestV1): Promise<void> {
     const parsed = LocalSnapshotManifestV1Schema.parse(manifest);
-    validateLocalWorkspaceSnapshotIntegrity(parsed.snapshot);
-    const canonicalEntries = [...parsed.entries].sort((a, b) => a.path.localeCompare(b.path));
-    if (canonicalJson(canonicalEntries) !== canonicalJson(parsed.entries))
-      throw new ChatbridgeError(
-        'Snapshot entries are not canonically sorted',
-        'LOCAL_MANIFEST_INVALID',
-      );
-    if (
-      parsed.snapshot.surface.manifestSha256 !==
-      localSnapshotSurfaceManifestFingerprint(parsed.entries)
-    )
-      throw new ChatbridgeError(
-        'Snapshot surface manifest fingerprint is invalid',
-        'LOCAL_MANIFEST_INTEGRITY_INVALID',
-      );
-    if (
-      parsed.snapshot.artifacts.gitStatusSha256 !== parsed.gitStatusBlobSha256 ||
-      parsed.snapshot.artifacts.gitDiffSha256 !== parsed.gitDiffBlobSha256
-    )
-      throw new ChatbridgeError(
-        'Snapshot artifact fingerprint is invalid',
-        'LOCAL_MANIFEST_INTEGRITY_INVALID',
-      );
+    validateManifestAuthority(parsed);
     for (const entry of parsed.entries) await this.assertBlob(entry.blobSha256, entry.bytes);
     await this.assertBlob(parsed.gitStatusBlobSha256);
     await this.assertBlob(parsed.gitDiffBlobSha256);
     const file = this.snapshotPath(parsed.taskId, parsed.snapshot.snapshotId);
     await mkdir(path.dirname(file), { recursive: true });
     const serialized = `${canonicalJson(parsed)}\n`;
+    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
     try {
-      await writeFile(file, serialized, { flag: 'wx' });
+      await writeFile(temporary, serialized, { flag: 'wx' });
+      await link(temporary, file);
     } catch (error: any) {
       if (error?.code !== 'EEXIST') throw error;
       if ((await readFile(file, 'utf8')) !== serialized)
@@ -96,6 +83,10 @@ export class LocalSnapshotStore {
           'Snapshot identity already has different bytes',
           'LOCAL_SNAPSHOT_IMMUTABLE',
         );
+    } finally {
+      await unlink(temporary).catch((error: any) => {
+        if (error?.code !== 'ENOENT') throw error;
+      });
     }
   }
 
@@ -108,7 +99,7 @@ export class LocalSnapshotStore {
         ),
       ),
     );
-    validateLocalWorkspaceSnapshotIntegrity(parsed.snapshot);
+    validateManifestAuthority(parsed, { taskId, snapshotId });
     return parsed;
   }
 
@@ -138,6 +129,61 @@ export class LocalSnapshotStore {
       throw new ChatbridgeError('Snapshot blob size mismatch', 'LOCAL_BLOB_INTEGRITY_INVALID');
     await this.readBlob(digest);
   }
+}
+
+function validateManifestAuthority(
+  manifest: LocalSnapshotManifestV1,
+  expected?: { taskId: string; snapshotId: string },
+): void {
+  validateLocalWorkspaceSnapshotIntegrity(manifest.snapshot);
+  if (
+    expected &&
+    (manifest.taskId !== expected.taskId || manifest.snapshot.snapshotId !== expected.snapshotId)
+  )
+    throw new ChatbridgeError(
+      'Snapshot request identity does not match manifest',
+      'LOCAL_MANIFEST_IDENTITY_MISMATCH',
+    );
+  const canonicalEntries = [...manifest.entries].sort(comparePaths);
+  if (canonicalJson(canonicalEntries) !== canonicalJson(manifest.entries))
+    throw new ChatbridgeError(
+      'Snapshot entries are not canonically sorted',
+      'LOCAL_MANIFEST_INVALID',
+    );
+  const paths = new Set<string>();
+  let totalBytes = 0;
+  for (const entry of manifest.entries) {
+    validateWorkspaceRelativePath(entry.path);
+    if (paths.has(entry.path))
+      throw new ChatbridgeError('Snapshot entry paths are not unique', 'LOCAL_MANIFEST_INVALID');
+    paths.add(entry.path);
+    totalBytes += entry.bytes;
+  }
+  if (
+    manifest.snapshot.surface.fileCount !== manifest.entries.length ||
+    manifest.snapshot.surface.totalBytes !== totalBytes
+  )
+    throw new ChatbridgeError('Snapshot surface totals are inconsistent', 'LOCAL_MANIFEST_INVALID');
+  if (
+    manifest.snapshot.surface.manifestSha256 !==
+    localSnapshotSurfaceManifestFingerprint(manifest.entries)
+  )
+    throw new ChatbridgeError(
+      'Snapshot surface manifest fingerprint is invalid',
+      'LOCAL_MANIFEST_INTEGRITY_INVALID',
+    );
+  if (
+    manifest.snapshot.artifacts.gitStatusSha256 !== manifest.gitStatusBlobSha256 ||
+    manifest.snapshot.artifacts.gitDiffSha256 !== manifest.gitDiffBlobSha256
+  )
+    throw new ChatbridgeError(
+      'Snapshot artifact fingerprint is invalid',
+      'LOCAL_MANIFEST_INTEGRITY_INVALID',
+    );
+}
+
+function comparePaths(left: { path: string }, right: { path: string }): number {
+  return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
 }
 
 function hashBytes(bytes: Buffer): string {

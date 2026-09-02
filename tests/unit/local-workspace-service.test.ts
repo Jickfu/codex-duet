@@ -204,5 +204,15 @@ describe('snapshot-bound LOCAL workspace service', () => {
     await expect(
       service.gitDiff({ taskId: 'demo', snapshotId: unsafeSnapshot.snapshotId }),
     ).rejects.toMatchObject({ code: 'LOCAL_SENSITIVE_PATH_UNREVIEWABLE' });
+    await expect(
+      service.workspaceInfo({ taskId: 'demo', snapshotId: unsafeSnapshot.snapshotId }),
+    ).rejects.toMatchObject({ code: 'LOCAL_SENSITIVE_PATH_UNREVIEWABLE' });
+    await expect(
+      service.executionSummary({
+        taskId: 'demo',
+        iteration: 1,
+        snapshotId: unsafeSnapshot.snapshotId,
+      }),
+    ).rejects.toMatchObject({ code: 'LOCAL_SENSITIVE_PATH_UNREVIEWABLE' });
   });
 });

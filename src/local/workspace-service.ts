@@ -182,8 +182,8 @@ export class LocalWorkspaceService {
     offset?: number | undefined;
     length?: number | undefined;
   }) {
-    const { manifest } = await this.boundManifest(request);
-    return this.readArtifact(manifest.gitStatusBlobSha256, request, 'git status');
+    const { statusArtifact } = await this.boundManifest(request);
+    return this.readArtifact(statusArtifact, request);
   }
 
   async gitDiff(request: {
@@ -192,8 +192,8 @@ export class LocalWorkspaceService {
     offset?: number | undefined;
     length?: number | undefined;
   }) {
-    const { manifest } = await this.boundManifest(request);
-    return this.readArtifact(manifest.gitDiffBlobSha256, request, 'git diff');
+    const { diffArtifact } = await this.boundManifest(request);
+    return this.readArtifact(diffArtifact, request);
   }
 
   async testStatus(request: {
@@ -241,7 +241,11 @@ export class LocalWorkspaceService {
     });
     const manifest = await this.snapshots.read(bound.taskId, bound.snapshotId);
     for (const entry of manifest.entries) this.assertExposable(entry.path);
-    return { bound, manifest };
+    const [statusArtifact, diffArtifact] = await Promise.all([
+      this.validateArtifact(manifest.gitStatusBlobSha256, 'STATUS', 'git status'),
+      this.validateArtifact(manifest.gitDiffBlobSha256, 'DIFF', 'git diff'),
+    ]);
+    return { bound, manifest, statusArtifact, diffArtifact };
   }
 
   private assertExposable(relativePath: string): void {
@@ -252,14 +256,9 @@ export class LocalWorkspaceService {
       );
   }
 
-  private async readArtifact(
-    digest: string,
-    request: { offset?: number | undefined; length?: number | undefined },
-    label: string,
-  ) {
+  private async validateArtifact(digest: string, expectedKind: 'STATUS' | 'DIFF', label: string) {
     const stored = await this.snapshots.readBlob(digest);
     const artifact = LocalGitArtifactV1Schema.parse(JSON.parse(stored.toString('utf8')));
-    const expectedKind = label === 'git status' ? 'STATUS' : 'DIFF';
     if (artifact.kind !== expectedKind)
       throw new ChatbridgeError(
         `${label} artifact kind is invalid`,
@@ -280,6 +279,13 @@ export class LocalWorkspaceService {
         `${label} exceeds the materialized limit`,
         'SNAPSHOT_LIMIT_EXCEEDED',
       );
+    return { bytes };
+  }
+
+  private readArtifact(
+    artifact: { bytes: Buffer },
+    request: { offset?: number | undefined; length?: number | undefined },
+  ) {
     const offset = z
       .number()
       .int()
@@ -293,14 +299,14 @@ export class LocalWorkspaceService {
         .parse(request.length ?? MAX_BASE64_SOURCE_BYTES),
       MAX_BASE64_SOURCE_BYTES,
     );
-    const slice = bytes.subarray(offset, Math.min(offset + length, bytes.length));
+    const slice = artifact.bytes.subarray(offset, Math.min(offset + length, artifact.bytes.length));
     return this.bounded({
       encoding: 'base64' as const,
       content: slice.toString('base64'),
       offset,
       bytes: slice.length,
-      totalBytes: bytes.length,
-      truncated: offset + slice.length < bytes.length,
+      totalBytes: artifact.bytes.length,
+      truncated: offset + slice.length < artifact.bytes.length,
     });
   }
 

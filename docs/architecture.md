@@ -80,14 +80,14 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 | Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**                     |
 | Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**                    |
 | `EXECUTING` crash reconciliation                   | **M3.2b FROZEN / REAL DESKTOP CRASH E2E PASS** |
-| Compact C2C and durable TaskSpec                   | **M3.2c PHASE 1 IN PROGRESS**                  |
+| Compact C2C and durable TaskSpec                   | **M3.2c FROZEN / REAL DESKTOP E2E PASS**       |
 | `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                                 |
 | `submit_response` MCP return path                  | **PLANNED M4**                                 |
 | LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**                             |
 | cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**                                 |
 | Hardening, packaging, and distribution             | **PLANNED M6**                                 |
 
-M3 can first complete the loop in GITHUB mode. A complete LOCAL loop depends on M4 and M5.
+M3 Durable Desktop Orchestration is frozen and complete with real Desktop E2E acceptance. M4 Local Read-Only MCP Data Plane is the next planned milestone; a complete LOCAL loop depends on M4 and M5.
 
 ## Roadmap ownership
 
@@ -96,8 +96,8 @@ M3 can first complete the loop in GITHUB mode. A complete LOCAL loop depends on 
 | M0        | Protocol / State Machine                    |
 | M1        | Browser Control Plane — **FROZEN**          |
 | M2        | GitHub Data Plane — **FROZEN**              |
-| M3        | Codex Skill + Orchestration                 |
-| M4        | Local Read-Only MCP Data Plane              |
+| M3        | Codex Skill + Orchestration — **FROZEN**    |
+| M4        | Local Read-Only MCP Data Plane — **NEXT**   |
 | M5        | cloudflared lifecycle / remote MCP exposure |
 | M6        | hardening / packaging / distribution        |
 

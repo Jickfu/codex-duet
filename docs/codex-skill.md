@@ -1,6 +1,6 @@
 # Codex Desktop Skill
 
-Status: **M3.0, M3.1, M3.2a, and M3.2b Frozen; M3.2c Phase 1 in progress**
+Status: **M3.0 through M3.2c Frozen; M3 complete with real Desktop E2E acceptance**
 
 Desktop E2E: **PASS**
 
@@ -62,11 +62,11 @@ After post-freeze dogfood exposed blank-new-chat stabilization, send-actionabili
 ## Roadmap
 
 - M3.0 Single-Round Orchestration: **Frozen**.
-- M3 overall: **IN PROGRESS**.
+- M3 overall: **FROZEN / COMPLETE — REAL DESKTOP E2E PASS**.
 - M3.1 Automatic Multi-Round Review/Fix Loop: **Frozen / Desktop E2E PASS**.
 - M3.2a Task ↔ ChatGPT Conversation Binding: **Frozen / Desktop E2E PASS**.
 - M3.2b `EXECUTING` Crash Reconciliation: **FROZEN / REAL DESKTOP CRASH E2E PASS**.
-- M3.2c Compact Browser Control and Resume UX: **PHASE 1 IN PROGRESS**.
+- M3.2c Compact Browser Control and Resume UX: **FROZEN / REAL DESKTOP E2E PASS**.
 
 M3.1 builds on the frozen single-round contract. One task keeps one branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` continues automatically under the current Codex Desktop Executor, subject to deterministic guards and a configurable iteration limit. M3.1 does not add a Node agent loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for M3.2c Phase 1.
+Accepted / Frozen.
 
 ## Context
 
@@ -35,3 +35,7 @@ If the bound conversation becomes unavailable, the task fails closed. Phase 1 do
 - Task semantics become durable and independently auditable without upgrading Frozen run checkpoints.
 - Compact payload construction must preserve every required literal and constraint or fail before sending.
 - A later amendment design can add append-only semantic changes without rewriting Phase-1 TaskSpec evidence.
+
+## Freeze evidence
+
+The frozen implementation baseline is `61d08dd77a7b1873cc11658535a42c72cc86d56f`. Real Desktop acceptance task `m3-compact-control-dogfood-20260902` completed the Compact Planner/Reviewer lifecycle, including one genuine Reviewer finding and the Frozen M3.1 multi-round fix path, at final immutable review ref `c42122044236e7878e69e48ca3c2273eaf81115e` with durable state `DONE` iteration 2 and 338 of 338 tests passing. The acceptance verified local TaskSpec authority, the bounded Compact Browser boundary, immutable GitHub review identity, and named-session reuse. Its dogfood branch remains unmerged as acceptance evidence; the implementation baseline above remains authoritative.

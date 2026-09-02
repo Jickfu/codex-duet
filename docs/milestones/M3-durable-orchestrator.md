@@ -1,6 +1,6 @@
 # M3 — Durable Desktop Orchestration
 
-M3 overall status: **IN PROGRESS**
+M3 overall status: **FROZEN / COMPLETE — REAL DESKTOP E2E PASS**
 
 ## M3.0 — Single-Round Orchestration
 
@@ -376,13 +376,13 @@ M3.1 is **Frozen** at implementation baseline `02a3fdb6c35a3766527543bb703b8ac67
 
 ## M3.2 decomposition
 
-M3 overall remains **IN PROGRESS**. M3.2 is split into independently bounded stages:
+M3 is **FROZEN / COMPLETE — REAL DESKTOP E2E PASS**. M3.2 was delivered through independently bounded stages:
 
 | Sub-stage | Scope                                 | Status                                   |
 | --------- | ------------------------------------- | ---------------------------------------- |
 | M3.2a     | Task ↔ ChatGPT conversation binding   | **FROZEN / DESKTOP E2E PASS**            |
 | M3.2b     | `EXECUTING` crash reconciliation      | **FROZEN / REAL DESKTOP CRASH E2E PASS** |
-| M3.2c     | Compact Browser Control and Resume UX | **PHASE 1 IN PROGRESS**                  |
+| M3.2c     | Compact Browser Control and Resume UX | **FROZEN / REAL DESKTOP E2E PASS**       |
 
 M3.2a is frozen before M3.2b begins. It changes only deterministic Browser Control Plane routing. Frozen M0 C2C, legacy M1 behavior, M2 Git/ref safety, M3.0, M3.1, review identity, and automatic multi-round execution remain unchanged.
 
@@ -560,6 +560,28 @@ The completed acceptance covered a real termination after an uncommitted edit an
 
 The authoritative decision is [ADR-014](../adr/ADR-014-executing-crash-reconciliation.md). M3.2c and M4 remain out of scope.
 
+### M3.2c — Compact Browser Control and Resume UX
+
+Status: **FROZEN / REAL DESKTOP E2E PASS**
+
+Frozen implementation baseline: `61d08dd77a7b1873cc11658535a42c72cc86d56f`
+
+M3.2c freezes Compact C2C, immutable local `TaskSpecV1` authority, Planner and Reviewer repository contracts, the 8192 UTF-8 byte complete-control limit and deterministic oversized pre-commit rejection, `TaskContextV1` fingerprint pinning, torn-init Compact recovery, named Playwright CLI session reuse, bounded channel-CDP authorization, actionable send selection, exact ambiguous-send recovery, compatibility with task-scoped conversation binding, and the real multi-round Reviewer/Fix lifecycle. Arbitrary-size Browser composer transport, 24K payload support, automatic conversation rebind, attachments, repository archives or diffs over Browser, LOCAL MCP, and broad packaging/browser compatibility remain non-goals.
+
+#### Real Desktop Compact C2C acceptance
+
+- Task: `m3-compact-control-dogfood-20260902`
+- `BASE_REF`: `61d08dd77a7b1873cc11658535a42c72cc86d56f`
+- Iteration 1 `REVIEW_REF`: `d5aca830e726c342eb6ed9afeed2b5d6961c976a`
+- Final iteration 2 `REVIEW_REF`: `c42122044236e7878e69e48ca3c2273eaf81115e`
+- Final state: `DONE` iteration 2; exact-HEAD quality evidence: `PASS` — 338 of 338 tests.
+- Compact controls: Planner 2745 bytes; Reviewers 559 and 781 bytes.
+- Bootstrap: the public zero-candidate path created a blank ChatGPT surface, confirmed one compact send, stabilized a concrete conversation identity, and persisted the task binding without an explicit URL, private DOM inspection, or manual send.
+- Review: iteration 1 found a genuine terminal-LF mismatch; automatic continuation changed only that byte-level condition, and iteration 2 approved the cumulative immutable range.
+- Session: final health validation reused the same named CLI session with zero new attach, detach, or authorization operations.
+
+The raw request was not duplicated wholesale into the Planner control. The exact-byte fixture intentionally skipped Prettier write because formatting would have violated its authoritative no-terminal-LF literal; lint, typecheck, tests, build, and diff-check passed. The dogfood task branch remains unmerged, and its document is not part of the implementation branch.
+
 ## Known issues
 
 ### ChatGPT tab ambiguity
@@ -578,6 +600,6 @@ The external Skill validator could not run because the current Python environmen
 | M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS**            |
 | M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS**            |
 | M3.2b     | `EXECUTING` Crash Reconciliation         | **FROZEN / REAL DESKTOP CRASH E2E PASS** |
-| M3.2c     | Compact Browser Control and Resume UX    | **PHASE 1 IN PROGRESS**                  |
+| M3.2c     | Compact Browser Control and Resume UX    | **FROZEN / REAL DESKTOP E2E PASS**       |
 
-M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.
+M3 is **FROZEN / COMPLETE — REAL DESKTOP E2E PASS**. M4 Local Read-Only MCP Data Plane is the next planned milestone; M5 and M6 ownership is unchanged.

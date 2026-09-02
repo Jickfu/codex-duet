@@ -111,14 +111,35 @@ export class DuetOrchestrator {
       throw new ChatbridgeError(`Run already exists for ${taskId}`, 'RUN_ALREADY_EXISTS');
     const request = await readFile(requestFile, 'utf8');
     if (!request.trim()) throw new ChatbridgeError('Request file is empty', 'REQUEST_EMPTY');
-    let taskSpecCandidate: TaskSpecV1 | undefined;
+    const [persistedTaskSpec, persistedTaskContext, persistedPlannerControl] = await Promise.all([
+      this.taskSpecs?.read(taskId),
+      this.taskContexts?.read(taskId),
+      this.readPlannerControl(taskId),
+    ]);
+    if (!persistedTaskSpec && (persistedTaskContext || persistedPlannerControl !== undefined))
+      throw new ChatbridgeError(
+        'Partial Compact initialization evidence is missing its authoritative TaskSpec',
+        'TASK_SPEC_MISSING',
+      );
+    let suppliedTaskSpec: TaskSpecV1 | undefined;
     if (taskSpecFile) {
       if (!this.taskSpecs || !this.taskContexts)
         throw new ChatbridgeError('TaskSpec storage is unavailable', 'TASK_SPEC_STORE_UNAVAILABLE');
-      taskSpecCandidate = validateTaskSpecCandidate(
+      suppliedTaskSpec = validateTaskSpecCandidate(
         JSON.parse(await readFile(taskSpecFile, 'utf8')) as unknown,
         { taskId, mode: 'GITHUB', rawRequest: request },
       );
+      if (persistedTaskSpec) await this.taskSpecs.createOrVerify(suppliedTaskSpec);
+    }
+    const recoveredTaskSpec = suppliedTaskSpec ?? persistedTaskSpec;
+    if (recoveredTaskSpec) {
+      if (!this.taskSpecs || !this.taskContexts)
+        throw new ChatbridgeError('TaskSpec storage is unavailable', 'TASK_SPEC_STORE_UNAVAILABLE');
+      validateTaskSpecCandidate(recoveredTaskSpec, {
+        taskId,
+        mode: 'GITHUB',
+        rawRequest: request,
+      });
     }
     const limits = MaxIterationsSchema.safeParse(maxIterationsInput);
     if (!limits.success)
@@ -130,8 +151,8 @@ export class DuetOrchestrator {
     if (rawContext.mode !== 'GITHUB')
       throw new ChatbridgeError('M3.0 supports GITHUB mode only', 'MODE_MISMATCH');
     const context = rawContext as GitHubContextRef;
-    const taskSpec = taskSpecCandidate
-      ? validateTaskSpecCandidate(taskSpecCandidate, {
+    const taskSpec = recoveredTaskSpec
+      ? validateTaskSpecCandidate(recoveredTaskSpec, {
           taskId,
           mode: 'GITHUB',
           rawRequest: request,
@@ -165,8 +186,7 @@ export class DuetOrchestrator {
         }
       : undefined;
     if (taskContext) {
-      const existing = await this.taskContexts!.read(taskId);
-      if (existing && !sameTaskContext(existing, taskContext))
+      if (persistedTaskContext && !sameTaskContext(persistedTaskContext, taskContext))
         throw new ChatbridgeError(
           'TaskContext already exists with different compact-task evidence',
           'TASK_CONTEXT_IMMUTABLE',
@@ -759,13 +779,36 @@ export class DuetOrchestrator {
     envelope: string,
   ): Promise<void> {
     const bytes = assertCompactC2CPayload(envelope);
-    await this.store.writeIterationArtifact(taskId, iteration, `${role}-control.txt`, envelope);
-    await this.store.writeIterationArtifact(
-      taskId,
-      iteration,
-      `${role}-control.json`,
-      `${JSON.stringify({ version: 1, sha256: sha256(envelope), bytes }, null, 2)}\n`,
-    );
+    const metadata = `${JSON.stringify({ version: 1, sha256: sha256(envelope), bytes }, null, 2)}\n`;
+    if (role === 'planner') {
+      await this.store.createOrVerifyIterationArtifact(
+        taskId,
+        iteration,
+        'planner-control.txt',
+        envelope,
+      );
+      await this.store.createOrVerifyIterationArtifact(
+        taskId,
+        iteration,
+        'planner-control.json',
+        metadata,
+      );
+      return;
+    }
+    await this.store.writeIterationArtifact(taskId, iteration, 'reviewer-control.txt', envelope);
+    await this.store.writeIterationArtifact(taskId, iteration, 'reviewer-control.json', metadata);
+  }
+
+  private async readPlannerControl(taskId: string): Promise<string | undefined> {
+    try {
+      return await readFile(
+        this.store.iterationArtifactPath(taskId, 1, 'planner-control.txt'),
+        'utf8',
+      );
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') return undefined;
+      throw error;
+    }
   }
 
   private now(): string {

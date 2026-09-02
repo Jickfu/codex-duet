@@ -112,6 +112,19 @@ describe('DuetRunStore', () => {
       'request',
     );
   });
+  it('creates or verifies immutable control artifacts without overwriting divergence', async () => {
+    const stateRoot = await root();
+    const store = new DuetRunStore(stateRoot);
+    await store.createOrVerifyIterationArtifact('demo', 1, 'planner-control.txt', 'planner');
+    const file = store.iterationArtifactPath('demo', 1, 'planner-control.txt');
+    await expect(
+      store.createOrVerifyIterationArtifact('demo', 1, 'planner-control.txt', 'planner'),
+    ).resolves.toBeUndefined();
+    await expect(
+      store.createOrVerifyIterationArtifact('demo', 1, 'planner-control.txt', 'different'),
+    ).rejects.toMatchObject({ code: 'CONTROL_ARTIFACT_IMMUTABLE' });
+    expect(await readFile(file, 'utf8')).toBe('planner');
+  });
   it.each(['PLANNING', 'PLAN', 'EXECUTING', 'EXECUTED', 'REVIEWING', 'DONE', 'BLOCKED'] as const)(
     'reads a real V1 %s checkpoint without mutation',
     async (state) => {

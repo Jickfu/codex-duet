@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ChatbridgeError } from '../core/errors.js';
 import { TaskIdSchema } from '../core/domain.js';
@@ -56,6 +56,30 @@ export class DuetRunStore {
       throw new ChatbridgeError('Invalid iteration artifact path', 'INVALID_ITERATION');
     const taskId = this.taskId(taskIdInput);
     await this.atomicWrite(this.iterationArtifactPath(taskId, iteration, name), content);
+  }
+
+  async createOrVerifyIterationArtifact(
+    taskIdInput: string,
+    iteration: number,
+    name: IterationArtifactName,
+    content: string,
+  ): Promise<void> {
+    const file = this.iterationArtifactPath(taskIdInput, iteration, name);
+    await mkdir(path.dirname(file), { recursive: true });
+    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' });
+      await link(temporary, file);
+    } catch (error: any) {
+      if (error?.code !== 'EEXIST') throw error;
+      if ((await readFile(file, 'utf8')) !== content)
+        throw new ChatbridgeError(
+          'Durable control artifact already exists with different content',
+          'CONTROL_ARTIFACT_IMMUTABLE',
+        );
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+    }
   }
 
   requestArtifactPath(taskIdInput: string): string {

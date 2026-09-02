@@ -322,6 +322,93 @@ describe('DuetOrchestrator', () => {
     expect(await store.read('demo')).toBeUndefined();
   });
 
+  it('recovers TaskSpec-only Compact init without a CLI TaskSpec candidate', async () => {
+    const stateRoot = path.join(temporary, '.chatbridge');
+    const taskSpecs = new TaskSpecStore(stateRoot);
+    const taskContexts = new TaskContextStore(stateRoot);
+    const spec = compactTaskSpec();
+    await taskSpecs.createOrVerify(spec);
+    const original = await readFile(taskSpecs.pathFor('demo'), 'utf8');
+    const recovering = new DuetOrchestrator(
+      provider as never,
+      store,
+      historyVerifier,
+      undefined,
+      taskSpecs,
+      taskContexts,
+    );
+    await recovering.init('demo', requestFile, outputFile);
+    const planner = await readFile(outputFile, 'utf8');
+    expect(planner).toContain('docs/contracts/planner-v1.md');
+    expect(planner).not.toContain('User request:');
+    expect(await readFile(taskSpecs.pathFor('demo'), 'utf8')).toBe(original);
+    expect(await taskContexts.read('demo')).toMatchObject({
+      taskSpecSha256: spec.integrity.sha256,
+      plannerControlSha256: sha256(planner),
+    });
+    expect(await store.read('demo')).toMatchObject({ state: 'PLANNING' });
+  });
+
+  it('recovers TaskSpec plus Planner control without TaskContext and preserves Planner bytes', async () => {
+    const { compactDuet, taskContexts } = await initCompact();
+    const runFile = path.join(temporary, '.chatbridge', 'runs', 'demo.json');
+    const plannerFile = store.iterationArtifactPath('demo', 1, 'planner-control.txt');
+    const planner = await readFile(plannerFile, 'utf8');
+    await unlink(runFile);
+    await unlink(taskContexts.pathFor('demo'));
+    await compactDuet.init('demo', requestFile, outputFile);
+    expect(await readFile(plannerFile, 'utf8')).toBe(planner);
+    expect(await readFile(outputFile, 'utf8')).toBe(planner);
+    expect(await taskContexts.read('demo')).toMatchObject({
+      plannerControlSha256: sha256(planner),
+    });
+  });
+
+  it('recovers full Compact sidecars without a run and preserves every evidence byte', async () => {
+    const { compactDuet, taskSpecs, taskContexts } = await initCompact();
+    const runFile = path.join(temporary, '.chatbridge', 'runs', 'demo.json');
+    const plannerFile = store.iterationArtifactPath('demo', 1, 'planner-control.txt');
+    const evidence = await Promise.all([
+      readFile(taskSpecs.pathFor('demo'), 'utf8'),
+      readFile(plannerFile, 'utf8'),
+      readFile(taskContexts.pathFor('demo'), 'utf8'),
+    ]);
+    await unlink(runFile);
+    await compactDuet.init('demo', requestFile, outputFile);
+    expect(
+      await Promise.all([
+        readFile(taskSpecs.pathFor('demo'), 'utf8'),
+        readFile(plannerFile, 'utf8'),
+        readFile(taskContexts.pathFor('demo'), 'utf8'),
+      ]),
+    ).toEqual(evidence);
+  });
+
+  it('fails Compact recovery when TaskContext exists without TaskSpec', async () => {
+    const { compactDuet, taskSpecs } = await initCompact();
+    await unlink(path.join(temporary, '.chatbridge', 'runs', 'demo.json'));
+    await unlink(taskSpecs.pathFor('demo'));
+    const recoveryOutput = path.join(temporary, 'missing-spec-output.txt');
+    await expect(compactDuet.init('demo', requestFile, recoveryOutput)).rejects.toMatchObject({
+      code: 'TASK_SPEC_MISSING',
+    });
+    expect(await store.read('demo')).toBeUndefined();
+    await expect(readFile(recoveryOutput, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('fails Compact recovery when Planner control exists without TaskSpec or TaskContext', async () => {
+    const { compactDuet, taskSpecs, taskContexts } = await initCompact();
+    await unlink(path.join(temporary, '.chatbridge', 'runs', 'demo.json'));
+    await unlink(taskSpecs.pathFor('demo'));
+    await unlink(taskContexts.pathFor('demo'));
+    const recoveryOutput = path.join(temporary, 'planner-only-output.txt');
+    await expect(compactDuet.init('demo', requestFile, recoveryOutput)).rejects.toMatchObject({
+      code: 'TASK_SPEC_MISSING',
+    });
+    expect(await store.read('demo')).toBeUndefined();
+    await expect(readFile(recoveryOutput, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('rejects an oversized compact envelope before producing Browser or pending-send input', async () => {
     const content: TaskSpecWithoutIntegrity = {
       version: 1,

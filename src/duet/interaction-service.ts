@@ -90,9 +90,17 @@ export class InteractionService {
         'Confirmed Codex Browser operation is waiting for a response',
         'CODEX_BROWSER_RESPONSE_PENDING',
       );
-    const canonical = conversationUrl
-      ? new ConversationUrlPolicy(this.allowedOrigins).canonicalizeStable(conversationUrl)
-      : existing?.conversationUrl;
+    const urls = new ConversationUrlPolicy(this.allowedOrigins);
+    const explicit = conversationUrl ? urls.canonicalizeStable(conversationUrl) : undefined;
+    const existingUrl = existing?.conversationUrl
+      ? urls.canonicalizeStable(existing.conversationUrl)
+      : undefined;
+    if (existingUrl && explicit && existingUrl !== explicit)
+      throw new ChatbridgeError(
+        'Explicit conversation URL conflicts with the durable Codex Browser binding',
+        'CHATGPT_CONVERSATION_BINDING_CONFLICT',
+      );
+    const canonical = existingUrl ?? explicit;
     const checkpoint = {
       version: 1 as const,
       taskId,
@@ -108,7 +116,6 @@ export class InteractionService {
     };
     const persist = async () => {
       if (canonical && this.reservations) {
-        const urls = new ConversationUrlPolicy(this.allowedOrigins);
         const reservations = new ConversationReservationService(
           this.reservations.taskBrowser,
           { getState: async (id) => (await this.reservations!.runs.read(id))?.state },

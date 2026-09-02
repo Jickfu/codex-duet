@@ -109,13 +109,26 @@ describe('task interaction policy', () => {
         )
       ).operation.state,
     ).toBe('RESPONDED');
+    await expect(
+      x.service.prepareCodexBrowser(
+        'demo',
+        message,
+        { kind: 'REVIEWER', iteration: 1 },
+        'https://chatgpt.com/c/other',
+      ),
+    ).rejects.toMatchObject({ code: 'CHATGPT_CONVERSATION_BINDING_CONFLICT' });
     await expect(x.service.assertCodexBrowserInbound('demo', response)).resolves.toBeUndefined();
     await writeFile(response, 'different reply', 'utf8');
     await expect(x.service.assertCodexBrowserInbound('demo', response)).rejects.toMatchObject({
       code: 'CODEX_BROWSER_RESPONSE_MISMATCH',
     });
 
-    await x.service.prepareCodexBrowser('demo', message, { kind: 'REVIEWER', iteration: 1 });
+    await x.service.prepareCodexBrowser(
+      'demo',
+      message,
+      { kind: 'REVIEWER', iteration: 1 },
+      'https://chatgpt.com/c/abc?ignored=1',
+    );
     await x.service.markCodexBrowserAttempted('demo');
     await x.service.completeCodexBrowser('demo', 'OUTCOME_UNKNOWN');
     await expect(

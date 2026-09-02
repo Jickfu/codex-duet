@@ -211,6 +211,118 @@ describe('Playwright CLI transport', () => {
       run.mock.calls.filter(([args]) => String(args[2]).includes('"kind":"commit"')),
     ).toHaveLength(1);
   });
+  it('preserves a prepare-stage generic CLI failure without commit or recovery', async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'prepare') throw new ChatbridgeError('failed', 'PLAYWRIGHT_CLI_FAILED');
+      return { stdout: encoded(args, { value: null }), stderr: '' };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'prepare', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await expect(session.sendMessage('once')).rejects.toMatchObject({
+      code: 'PLAYWRIGHT_CLI_FAILED',
+    });
+    const sources = run.mock.calls.map(([args]) => String(args[2]));
+    expect(sources.some((source) => source.includes('"kind":"commit"'))).toBe(false);
+    expect(sources.some((source) => source.includes('"kind":"recover"'))).toBe(false);
+  });
+  it.each(['PLAYWRIGHT_CLI_FAILED', 'PLAYWRIGHT_CLI_SESSION_LOST'])(
+    'exactly recovers a commit-stage %s without a second commit',
+    async (code) => {
+      const target = 'https://chatgpt.com/c/task';
+      const marker = { conversationUrl: target, outgoingUserMessageId: 'new' };
+      const run = vi.fn(async (args: readonly string[]) => {
+        const source = String(args[2]);
+        const kind = source.match(/"kind":"([^"]+)"/)?.[1];
+        if (kind === 'commit') throw new ChatbridgeError('transport failed', code);
+        return {
+          stdout: encoded(args, {
+            value:
+              kind === 'ensure'
+                ? { conversationUrl: target }
+                : kind === 'prepare'
+                  ? { conversationUrl: target, previousUserMessageId: 'old' }
+                  : marker,
+          }),
+          stderr: '',
+        };
+      });
+      const session = new PlaywrightCliChatGPTSession({ run }, 'recover', target, [
+        'https://chatgpt.com',
+      ]);
+      await session.connect({ conversationUrl: target });
+      expect(await session.sendMessage('once')).toEqual(marker);
+      const sources = run.mock.calls.map(([args]) => String(args[2]));
+      expect(sources.filter((source) => source.includes('"kind":"commit"'))).toHaveLength(1);
+      expect(sources.find((source) => source.includes('"kind":"recover"'))).toContain(
+        '"exactOnly":true',
+      );
+    },
+  );
+  it('maps a commit-stage generic CLI failure with a recovery miss to unknown', async () => {
+    const run = vi.fn(async (args: readonly string[]) => {
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+      if (kind === 'commit') throw new ChatbridgeError('failed', 'PLAYWRIGHT_CLI_FAILED');
+      return {
+        stdout: encoded(args, {
+          value:
+            kind === 'prepare'
+              ? { conversationUrl: 'https://chatgpt.com/c/task', previousUserMessageId: 'old' }
+              : null,
+        }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'miss', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await expect(session.sendMessage('once')).rejects.toMatchObject({
+      code: 'SEND_OUTCOME_UNKNOWN',
+    });
+    expect(
+      run.mock.calls.filter(([args]) => String(args[2]).includes('"kind":"commit"')),
+    ).toHaveLength(1);
+  });
+  it.each(['missing', 'invalid'])(
+    'exactly recovers when the commit structured result is %s',
+    async (resultKind) => {
+      const marker = {
+        conversationUrl: 'https://chatgpt.com/c/task',
+        outgoingUserMessageId: 'new',
+      };
+      const run = vi.fn(async (args: readonly string[]) => {
+        const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1];
+        if (kind === 'commit') {
+          const nonce = String(args[2]).match(/"nonce":"([^"]+)"/)?.[1];
+          return {
+            stdout:
+              resultKind === 'missing' ? 'no structured output' : `CHATBRIDGE_RESULT_${nonce}_00`,
+            stderr: '',
+          };
+        }
+        return {
+          stdout: encoded(args, {
+            value:
+              kind === 'prepare'
+                ? { conversationUrl: marker.conversationUrl, previousUserMessageId: 'old' }
+                : marker,
+          }),
+          stderr: '',
+        };
+      });
+      const session = new PlaywrightCliChatGPTSession(
+        { run },
+        'structured',
+        marker.conversationUrl,
+        ['https://chatgpt.com'],
+      );
+      expect(await session.sendMessage('once')).toEqual(marker);
+      expect(
+        run.mock.calls.filter(([args]) => String(args[2]).includes('"kind":"commit"')),
+      ).toHaveLength(1);
+    },
+  );
   it('enables exact-only recovery after an explicit target pin', async () => {
     const target = 'https://chatgpt.com/c/task';
     const sources: string[] = [];

@@ -7,6 +7,7 @@ import { ChatbridgeError } from '../../src/core/errors.js';
 function harness(success: (args: readonly string[]) => boolean) {
   let value: RuntimeSelection | undefined;
   let attached = false;
+  let now = 0;
   const runner = {
     run: vi.fn(async (args: readonly string[]) => {
       if (args.includes('run-code') && attached)
@@ -41,7 +42,13 @@ function harness(success: (args: readonly string[]) => boolean) {
       value = v;
     }),
   };
-  return { runner, detection, store };
+  const timing = {
+    now: vi.fn(() => now),
+    delay: vi.fn(async (ms: number) => {
+      now += ms;
+    }),
+  };
+  return { runner, detection, store, timing };
 }
 describe('native existing-session selection', () => {
   it('prefers Chrome extension before every other runtime', async () => {
@@ -52,6 +59,7 @@ describe('native existing-session selection', () => {
       h.runner,
       h.detection,
       h.store,
+      h.timing,
     );
     expect(result).toMatchObject({ mode: 'existing-extension', browser: 'chrome' });
     expect(h.runner.run).toHaveBeenCalledTimes(2);
@@ -64,8 +72,92 @@ describe('native existing-session selection', () => {
       h.runner,
       h.detection,
       h.store,
+      h.timing,
     );
     expect(result).toMatchObject({ mode: 'existing-channel-cdp', browser: 'chrome' });
+  });
+  it('keeps retrying channel CDP when authorization arrives after the old five-second window', async () => {
+    let attempts = 0;
+    const h = harness((args) => {
+      if (!args.includes('--cdp=chrome')) return false;
+      attempts += 1;
+      return attempts === 17;
+    });
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'chrome', transport: 'cdp' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result).toMatchObject({ mode: 'existing-channel-cdp', browser: 'chrome' });
+    expect(h.timing.delay).toHaveBeenCalledTimes(16);
+    expect(h.detection.open).not.toHaveBeenCalled();
+  });
+  it('returns immediately when channel CDP authorization is already available', async () => {
+    const h = harness((args) => args.includes('--cdp=chrome'));
+    await attachBrowser(
+      loadConfig(),
+      { browser: 'chrome', transport: 'cdp' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(h.timing.delay).not.toHaveBeenCalled();
+  });
+  it('bounds explicit channel CDP authorization and cleans every failed attempt', async () => {
+    const h = harness(() => false);
+    await expect(
+      attachBrowser(
+        loadConfig(),
+        { browser: 'chrome', transport: 'cdp' },
+        h.runner,
+        h.detection,
+        h.store,
+        h.timing,
+      ),
+    ).rejects.toMatchObject({ code: 'CHANNEL_CDP_AUTHORIZATION_TIMEOUT' });
+    const attachCount = h.runner.run.mock.calls.filter(([args]) => args.includes('attach')).length;
+    const detachCount = h.runner.run.mock.calls.filter(([args]) => args.includes('detach')).length;
+    expect(attachCount).toBeGreaterThan(1);
+    expect(detachCount).toBe(attachCount);
+    expect(h.store.write).not.toHaveBeenCalled();
+  });
+  it('waits for the full channel grace before auto managed fallback', async () => {
+    const h = harness(() => false);
+    h.detection.installed = vi.fn(async (channel) => channel === 'chrome');
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'auto', transport: 'auto' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result).toMatchObject({ mode: 'managed-installed', browser: 'chrome' });
+    expect(h.timing.delay).toHaveBeenCalled();
+    expect(h.detection.open).toHaveBeenCalledTimes(1);
+  });
+  it('does not open a managed browser when auto channel CDP succeeds near the deadline', async () => {
+    let chromeAttempts = 0;
+    const h = harness((args) => {
+      if (!args.includes('--cdp=chrome')) return false;
+      chromeAttempts += 1;
+      return chromeAttempts === 30;
+    });
+    h.detection.installed = vi.fn(async (channel) => channel === 'chrome');
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'auto', transport: 'auto' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result).toMatchObject({ mode: 'existing-channel-cdp', browser: 'chrome' });
+    expect(h.detection.open).not.toHaveBeenCalled();
   });
   it('prefers Chrome over Edge when otherwise equal', async () => {
     const h = harness((args) => args.some((a) => a.startsWith('--extension=')));
@@ -75,6 +167,7 @@ describe('native existing-session selection', () => {
       h.runner,
       h.detection,
       h.store,
+      h.timing,
     );
     expect(result.browser).toBe('chrome');
   });
@@ -87,6 +180,7 @@ describe('native existing-session selection', () => {
         h.runner,
         h.detection,
         h.store,
+        h.timing,
       ),
     ).rejects.toMatchObject({ code: 'EXTENSION_UNAVAILABLE' });
     expect(h.detection.installed).not.toHaveBeenCalled();
@@ -111,6 +205,7 @@ describe('native existing-session selection', () => {
         h.runner,
         h.detection,
         h.store,
+        h.timing,
       ),
     ).rejects.toMatchObject({ code: 'CLI_RESULT_MISSING' });
     expect(h.runner.run.mock.calls.flat().join(' ')).not.toContain('--cdp=');
@@ -131,6 +226,7 @@ describe('native existing-session selection', () => {
         h.runner,
         h.detection,
         h.store,
+        h.timing,
       ),
     ).rejects.toMatchObject({ code: 'PLAYWRIGHT_CLI_FAILED' });
     expect(h.detection.installed).not.toHaveBeenCalled();
@@ -143,6 +239,7 @@ describe('native existing-session selection', () => {
       h.runner,
       h.detection,
       h.store,
+      h.timing,
     );
     expect(result.mode).toBe('raw-cdp');
   });
@@ -155,6 +252,7 @@ describe('native existing-session selection', () => {
       h.runner,
       h.detection,
       h.store,
+      h.timing,
     );
     expect(result).toMatchObject({ mode: 'managed-installed', browser: 'chrome' });
     expect(h.detection.open).toHaveBeenCalled();
@@ -168,6 +266,7 @@ describe('native existing-session selection', () => {
       h.runner,
       h.detection,
       h.store,
+      h.timing,
     );
     expect(result.mode).toBe('bundled');
   });

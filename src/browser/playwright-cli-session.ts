@@ -16,6 +16,19 @@ interface SendPreparation {
   previousAssistantMessageId?: string;
 }
 
+const ambiguousCommitTransportFailures = new Set([
+  'PLAYWRIGHT_CLI_TIMEOUT',
+  'PLAYWRIGHT_CLI_FAILED',
+  'PLAYWRIGHT_CLI_SESSION_LOST',
+  'CLI_RESULT_MISSING',
+  'CLI_RESULT_INVALID',
+  'SEND_OBSERVER_FAILED',
+]);
+
+export function isAmbiguousCommitTransportFailure(error: unknown): error is ChatbridgeError {
+  return error instanceof ChatbridgeError && ambiguousCommitTransportFailures.has(error.code);
+}
+
 export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
   private selectedConversationUrl?: string;
   private strictConversationTarget = false;
@@ -74,12 +87,8 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
     try {
       return (await this.operation(commit, 30_000, 'send')).value as SendMarker;
     } catch (error) {
-      if (
-        !(error instanceof ChatbridgeError) ||
-        !['PLAYWRIGHT_CLI_TIMEOUT', 'SEND_OBSERVER_FAILED'].includes(error.code)
-      )
-        throw error;
-      const recovered = await this.recoverSend(prepared);
+      if (!isAmbiguousCommitTransportFailure(error)) throw error;
+      const recovered = await this.recoverSend(prepared).catch(() => undefined);
       if (recovered) return recovered as SendMarker;
       throw new ChatbridgeError(
         'Send may have had a side effect, but no new user message identity could be confirmed; do not retry automatically',

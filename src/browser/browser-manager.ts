@@ -43,6 +43,19 @@ const channels = (browser: BrowserKind) => [
   ...(enabled(browser, 'chrome') ? ['chrome' as const] : []),
   ...(enabled(browser, 'msedge') ? ['msedge' as const] : []),
 ];
+const CHANNEL_CDP_AUTHORIZATION_GRACE_MS = 30_000;
+const CHANNEL_CDP_ATTACH_ATTEMPT_MS = 5_000;
+const CHANNEL_CDP_RETRY_DELAY_MS = 500;
+
+export interface AttachTiming {
+  now(): number;
+  delay(ms: number): Promise<void>;
+}
+
+const defaultTiming: AttachTiming = {
+  now: Date.now,
+  delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
 
 export async function attachBrowser(
   config: Config,
@@ -52,6 +65,7 @@ export async function attachBrowser(
   store: Pick<RuntimeStore, 'read' | 'write'> = new RuntimeStore(
     path.resolve(process.cwd(), '.chatbridge'),
   ),
+  timing: AttachTiming = defaultTiming,
 ): Promise<RuntimeSelection> {
   const session = sessionName();
   const save = async (runtime: RuntimeSelection) => {
@@ -68,7 +82,7 @@ export async function attachBrowser(
     );
   if (!options.endpoint && (options.transport === 'auto' || options.transport === 'extension')) {
     for (const browser of channels(options.browser)) {
-      if (await tryCliAttach(runner, session, `--extension=${browser}`, config))
+      if ((await tryCliAttach(runner, session, `--extension=${browser}`, config)).ok)
         return save({
           mode: 'existing-extension',
           browser,
@@ -84,24 +98,45 @@ export async function attachBrowser(
       );
   }
   if (!options.endpoint && (options.transport === 'auto' || options.transport === 'cdp')) {
-    for (const browser of channels(options.browser)) {
-      if (await tryCliAttach(runner, session, `--cdp=${browser}`, config))
-        return save({
-          mode: 'existing-channel-cdp',
-          browser,
-          transport: 'cli',
+    const authorizationDeadline = timing.now() + CHANNEL_CDP_AUTHORIZATION_GRACE_MS;
+    let lastFailureCode = 'PLAYWRIGHT_CLI_FAILED';
+    const channelCandidates = channels(options.browser);
+    while (timing.now() < authorizationDeadline) {
+      for (const browser of channelCandidates) {
+        if (timing.now() >= authorizationDeadline) break;
+        const remaining = authorizationDeadline - timing.now();
+        const result = await tryCliAttach(
+          runner,
           session,
-          attachedAt: new Date().toISOString(),
-        });
+          `--cdp=${browser}`,
+          config,
+          Math.min(CHANNEL_CDP_ATTACH_ATTEMPT_MS, remaining),
+        );
+        if (result.ok)
+          return save({
+            mode: 'existing-channel-cdp',
+            browser,
+            transport: 'cli',
+            session,
+            attachedAt: new Date().toISOString(),
+          });
+        lastFailureCode = result.code;
+        const delay = Math.min(CHANNEL_CDP_RETRY_DELAY_MS, authorizationDeadline - timing.now());
+        if (delay > 0) await timing.delay(delay);
+      }
     }
+    if (process.env.CHATBRIDGE_DEBUG === '1')
+      console.error(
+        `[DEBUG] Channel CDP authorization grace exhausted category=${lastFailureCode}`,
+      );
     if (options.transport === 'cdp')
       throw new ChatbridgeError(
-        `Channel CDP is not authorized for ${options.browser}. Enable remote debugging at chrome://inspect/#remote-debugging.`,
-        'CHANNEL_CDP_UNAVAILABLE',
+        `${options.browser} channel CDP did not become available within the bounded authorization window. Enable remote debugging at chrome://inspect/#remote-debugging and try again.`,
+        'CHANNEL_CDP_AUTHORIZATION_TIMEOUT',
       );
   }
   if (options.endpoint) {
-    if (await tryCliAttach(runner, session, `--cdp=${options.endpoint}`, config))
+    if ((await tryCliAttach(runner, session, `--cdp=${options.endpoint}`, config)).ok)
       return save({
         mode: 'raw-cdp',
         browser: options.browser === 'msedge' ? 'msedge' : 'chrome',
@@ -151,11 +186,16 @@ async function tryCliAttach(
   session: string,
   argument: string,
   config: Config,
-) {
+  timeoutMs = 5_000,
+): Promise<{ ok: true } | { ok: false; code: string }> {
   try {
-    await runner.run([`--session=${session}`, 'attach', argument], 5000);
-  } catch {
-    return false;
+    await runner.run([`--session=${session}`, 'attach', argument], timeoutMs);
+  } catch (error) {
+    await runner.run([`--session=${session}`, 'detach'], 3000).catch(() => undefined);
+    return {
+      ok: false,
+      code: error instanceof ChatbridgeError ? error.code : 'PLAYWRIGHT_CLI_FAILED',
+    };
   }
   try {
     await new PlaywrightCliChatGPTSession(
@@ -165,7 +205,7 @@ async function tryCliAttach(
       config.allowedOrigins,
       config.timeoutMs,
     ).ensureConversation();
-    return true;
+    return { ok: true };
   } catch (error) {
     await runner.run([`--session=${session}`, 'detach'], 3000).catch(() => undefined);
     throw error;

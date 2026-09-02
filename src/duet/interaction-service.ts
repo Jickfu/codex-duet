@@ -55,6 +55,7 @@ export class InteractionService {
     taskId: string,
     messageFile: string,
     identity: { kind: 'DISCUSSION' | 'PLANNER' | 'REVIEWER'; iteration: number; round?: number },
+    conversationUrl?: string,
   ): Promise<CodexBrowserControlV1> {
     const policy = await this.requireProvider(taskId, 'CODEX_BROWSER');
     if (!policy)
@@ -89,11 +90,14 @@ export class InteractionService {
         'Confirmed Codex Browser operation is waiting for a response',
         'CODEX_BROWSER_RESPONSE_PENDING',
       );
+    const canonical = conversationUrl
+      ? new ConversationUrlPolicy(this.allowedOrigins).canonicalizeStable(conversationUrl)
+      : existing?.conversationUrl;
     const checkpoint = {
       version: 1 as const,
       taskId,
       provider: 'CODEX_BROWSER' as const,
-      ...(existing?.conversationUrl ? { conversationUrl: existing.conversationUrl } : {}),
+      ...(canonical ? { conversationUrl: canonical } : {}),
       operation: {
         operationId,
         ...identity,
@@ -102,7 +106,22 @@ export class InteractionService {
         preparedAt: this.now(),
       },
     };
-    await this.codexBrowser.write(checkpoint);
+    const persist = async () => {
+      if (canonical && this.reservations) {
+        const urls = new ConversationUrlPolicy(this.allowedOrigins);
+        const reservations = new ConversationReservationService(
+          this.reservations.taskBrowser,
+          { getState: async (id) => (await this.reservations!.runs.read(id))?.state },
+          urls,
+          this.codexBrowser,
+        );
+        await reservations.assertTaskExists(taskId);
+        await reservations.assertAvailable(taskId, canonical, Boolean(existing?.conversationUrl));
+      }
+      await this.codexBrowser.write(checkpoint);
+    };
+    if (this.reservations) await this.reservations.lock.withLock(persist);
+    else await persist();
     return checkpoint;
   }
 
@@ -183,6 +202,7 @@ export class InteractionService {
   async recordCodexBrowserResponse(
     taskId: string,
     responseFile: string,
+    conversationUrl?: string,
   ): Promise<CodexBrowserControlV1> {
     const policy = await this.requireProvider(taskId, 'CODEX_BROWSER');
     if (!policy)
@@ -196,12 +216,22 @@ export class InteractionService {
         'Codex Browser response requires a confirmed send',
         'CODEX_BROWSER_SEND_NOT_CONFIRMED',
       );
-    const inboundSha256 = sha256(await readFile(responseFile, 'utf8'));
+    const canonical = conversationUrl
+      ? new ConversationUrlPolicy(this.allowedOrigins).canonicalizeStable(conversationUrl)
+      : undefined;
+    if (!canonical || canonical !== current.conversationUrl)
+      throw new ChatbridgeError(
+        'Codex Browser receive requires the exact durable conversation URL',
+        'CHATGPT_CONVERSATION_UNAVAILABLE',
+      );
+    const response = await readFile(responseFile, 'utf8');
+    const inboundSha256 = sha256(response);
     if (current.operation.inboundSha256 && current.operation.inboundSha256 !== inboundSha256)
       throw new ChatbridgeError(
         'Codex Browser response evidence already exists with different content',
         'CODEX_BROWSER_RESPONSE_IMMUTABLE',
       );
+    await this.codexBrowser.createResponseArtifact(taskId, current.operation.operationId, response);
     const updated = {
       ...current,
       operation: {
@@ -212,6 +242,22 @@ export class InteractionService {
     };
     await this.codexBrowser.write(updated);
     return updated;
+  }
+
+  async assertCodexBrowserInbound(taskId: string, responseFile: string): Promise<void> {
+    const policy = await this.policies.read(taskId);
+    if (!policy || policy.browserControlProvider !== 'CODEX_BROWSER') return;
+    const current = await this.codexBrowser.read(taskId);
+    const actual = sha256(await readFile(responseFile, 'utf8'));
+    if (
+      !current ||
+      current.operation.state !== 'RESPONDED' ||
+      current.operation.inboundSha256 !== actual
+    )
+      throw new ChatbridgeError(
+        'Lifecycle input does not match the recorded Codex Browser response',
+        'CODEX_BROWSER_RESPONSE_MISMATCH',
+      );
   }
 }
 

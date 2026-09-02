@@ -103,6 +103,7 @@ export async function duetInit(
 }
 
 export async function duetIngest(task: string, messageFile: string): Promise<void> {
+  await interactionServices().interaction.assertCodexBrowserInbound(task, messageFile);
   console.log(JSON.stringify(await orchestrator().ingest(task, messageFile), null, 2));
 }
 
@@ -146,14 +147,20 @@ export async function duetCodexBrowserPrepare(
   kind: 'DISCUSSION' | 'PLANNER' | 'REVIEWER',
   iteration: number,
   round?: number,
+  conversationUrl?: string,
 ): Promise<void> {
   console.log(
     JSON.stringify(
-      await interactionServices().interaction.prepareCodexBrowser(task, messageFile, {
-        kind,
-        iteration,
-        ...(round ? { round } : {}),
-      }),
+      await interactionServices().interaction.prepareCodexBrowser(
+        task,
+        messageFile,
+        {
+          kind,
+          iteration,
+          ...(round ? { round } : {}),
+        },
+        conversationUrl,
+      ),
       null,
       2,
     ),
@@ -184,10 +191,18 @@ export async function duetCodexBrowserMarkAttempted(task: string): Promise<void>
   );
 }
 
-export async function duetCodexBrowserReceive(task: string, responseFile: string): Promise<void> {
+export async function duetCodexBrowserReceive(
+  task: string,
+  responseFile: string,
+  conversationUrl?: string,
+): Promise<void> {
   console.log(
     JSON.stringify(
-      await interactionServices().interaction.recordCodexBrowserResponse(task, responseFile),
+      await interactionServices().interaction.recordCodexBrowserResponse(
+        task,
+        responseFile,
+        conversationUrl,
+      ),
       null,
       2,
     ),
@@ -209,6 +224,7 @@ export async function duetDiscussionPrepare(
 }
 
 export async function duetDiscussionIngest(task: string, messageFile: string): Promise<void> {
+  await interactionServices().interaction.assertCodexBrowserInbound(task, messageFile);
   console.log(
     JSON.stringify(await interactionServices().discussion.ingest(task, messageFile), null, 2),
   );

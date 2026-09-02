@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ChatbridgeError } from '../core/errors.js';
 import { TaskIdSchema } from '../core/domain.js';
@@ -53,6 +53,32 @@ export class CodexBrowserControlStore {
       if (value) result.push(value);
     }
     return result;
+  }
+
+  async createResponseArtifact(taskIdInput: string, operationId: string, content: string) {
+    const file = path.join(
+      this.stateRoot,
+      'runs',
+      this.taskId(taskIdInput),
+      'codex-browser',
+      operationId,
+      'response.txt',
+    );
+    await mkdir(path.dirname(file), { recursive: true });
+    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' });
+      await link(temporary, file);
+    } catch (error: any) {
+      if (error?.code !== 'EEXIST') throw error;
+      if ((await readFile(file, 'utf8')) !== content)
+        throw new ChatbridgeError(
+          'Codex Browser response artifact is immutable',
+          'CODEX_BROWSER_RESPONSE_IMMUTABLE',
+        );
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+    }
   }
 
   pathFor(taskIdInput: string): string {

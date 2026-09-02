@@ -178,6 +178,7 @@ duet
   )
   .requiredOption('--iteration <n>', 'lifecycle iteration', Number)
   .option('--round <n>', 'discussion round', Number)
+  .option('--conversation-url <url>', 'exact known ChatGPT conversation')
   .action(
     (o: {
       task: string;
@@ -185,7 +186,16 @@ duet
       kind: 'DISCUSSION' | 'PLANNER' | 'REVIEWER';
       iteration: number;
       round?: number;
-    }) => duetCodexBrowserPrepare(o.task, o.messageFile, o.kind, o.iteration, o.round),
+      conversationUrl?: string;
+    }) =>
+      duetCodexBrowserPrepare(
+        o.task,
+        o.messageFile,
+        o.kind,
+        o.iteration,
+        o.round,
+        o.conversationUrl,
+      ),
   );
 duet
   .command('codex-browser-mark-attempted')
@@ -208,8 +218,9 @@ duet
   .command('codex-browser-receive')
   .requiredOption('--task <id>')
   .requiredOption('--response-file <path>')
-  .action((o: { task: string; responseFile: string }) =>
-    duetCodexBrowserReceive(o.task, o.responseFile),
+  .requiredOption('--conversation-url <url>')
+  .action((o: { task: string; responseFile: string; conversationUrl: string }) =>
+    duetCodexBrowserReceive(o.task, o.responseFile, o.conversationUrl),
   );
 duet
   .command('discussion-prepare')

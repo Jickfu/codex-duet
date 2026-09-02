@@ -100,9 +100,20 @@ describe('task interaction policy', () => {
     expect(confirmed.conversationUrl).toBe('https://chatgpt.com/c/abc?ignored=1');
     const response = path.join(x.root, 'response.txt');
     await writeFile(response, 'reply', 'utf8');
-    expect((await x.service.recordCodexBrowserResponse('demo', response)).operation.state).toBe(
-      'RESPONDED',
-    );
+    expect(
+      (
+        await x.service.recordCodexBrowserResponse(
+          'demo',
+          response,
+          'https://chatgpt.com/c/abc?ignored=1',
+        )
+      ).operation.state,
+    ).toBe('RESPONDED');
+    await expect(x.service.assertCodexBrowserInbound('demo', response)).resolves.toBeUndefined();
+    await writeFile(response, 'different reply', 'utf8');
+    await expect(x.service.assertCodexBrowserInbound('demo', response)).rejects.toMatchObject({
+      code: 'CODEX_BROWSER_RESPONSE_MISMATCH',
+    });
 
     await x.service.prepareCodexBrowser('demo', message, { kind: 'REVIEWER', iteration: 1 });
     await x.service.markCodexBrowserAttempted('demo');

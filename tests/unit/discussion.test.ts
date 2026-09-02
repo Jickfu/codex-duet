@@ -77,6 +77,17 @@ async function fixture() {
 }
 
 describe('bounded pre-planning Discussion', () => {
+  it('rejects a complete UTF-8 control payload over 8192 bytes', async () => {
+    const x = await fixture();
+    const request = path.join(x.root, 'large.txt');
+    await writeFile(request, '界'.repeat(3000), 'utf8');
+    await expect(
+      x.service.prepare('demo', request, path.join(x.root, 'out.json')),
+    ).rejects.toMatchObject({
+      code: 'DISCUSSION_PAYLOAD_TOO_LARGE',
+    });
+  });
+
   it('uses a separate strict envelope and gates Planner until convergence', async () => {
     const x = await fixture();
     const request = path.join(x.root, 'request.txt');

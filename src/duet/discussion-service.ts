@@ -66,6 +66,11 @@ export class DiscussionService {
       requestSha256,
       content,
     });
+    if (Buffer.byteLength(canonicalJson(control), 'utf8') > 8192)
+      throw new ChatbridgeError(
+        'Complete Discussion control exceeds 8192 UTF-8 bytes',
+        'DISCUSSION_PAYLOAD_TOO_LARGE',
+      );
     await this.discussions.createControl(control);
     await this.discussions.writeSummary({
       version: 1,
@@ -86,6 +91,11 @@ export class DiscussionService {
     } catch {
       throw new ChatbridgeError('Malformed DiscussionResponseV1', 'DISCUSSION_RESPONSE_INVALID');
     }
+    if (Buffer.byteLength(canonicalJson(response), 'utf8') > 8192)
+      throw new ChatbridgeError(
+        'Complete Discussion response exceeds 8192 UTF-8 bytes',
+        'DISCUSSION_PAYLOAD_TOO_LARGE',
+      );
     const [run, policy, spec, summary] = await Promise.all([
       this.runs.read(taskId),
       this.policies.read(taskId),
@@ -114,7 +124,7 @@ export class DiscussionService {
     if (response.outcome === 'CONTINUE' && response.round === 3)
       throw new ChatbridgeError('Discussion round limit reached', 'DISCUSSION_LIMIT_REACHED');
     await this.discussions.createResponse(response);
-    const status =
+    const status: 'ACTIVE' | 'CONVERGED' | 'BLOCKED' | 'FAILED' =
       response.outcome === 'CONVERGED'
         ? 'CONVERGED'
         : response.outcome === 'USER_DECISION_REQUIRED'
@@ -122,7 +132,7 @@ export class DiscussionService {
           : response.outcome === 'FAILED'
             ? 'FAILED'
             : 'ACTIVE';
-    await this.discussions.writeSummary({
+    const nextSummary = {
       ...summary,
       rounds: summary.rounds.map((round) =>
         round.round === response.round
@@ -130,7 +140,7 @@ export class DiscussionService {
           : round,
       ),
       status,
-    });
+    };
     if (status === 'BLOCKED' || status === 'FAILED') {
       const mutable = await this.runs.migrate(taskId);
       await this.runs.write({
@@ -140,6 +150,7 @@ export class DiscussionService {
         updatedAt: new Date().toISOString(),
       });
     }
+    await this.discussions.writeSummary(nextSummary);
     return response;
   }
 

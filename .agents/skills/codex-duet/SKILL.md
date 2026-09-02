@@ -5,9 +5,11 @@ description: Orchestrate a GitHub-mode task through ChatGPT Web planning and rev
 
 # Codex Duet
 
-Act as the outer orchestrator and sole Executor. ChatGPT Web is only the Planner, Architect, and Reviewer. Follow [the deterministic multi-round workflow](references/workflow.md) and the repository's authoritative architecture documents, especially `docs/architecture.md`, ADR-010, ADR-012, and ADR-013.
+Act as the outer orchestrator and sole Executor. ChatGPT Web is only the Planner, Architect, and Reviewer. Follow [the deterministic multi-round workflow](references/workflow.md) and the repository's authoritative architecture documents, especially `docs/architecture.md`, ADR-010, ADR-012, ADR-013, and ADR-015.
 
-Normalize the user's request without changing it, expanding scope, or deciding major product choices. Unless the user explicitly asks to skip planning, obtain a ChatGPT PLAN before editing.
+Normalize the user's request into a strict TaskSpecV1 without changing it, expanding scope, dropping exact literals, or deciding major product choices. Preserve the raw request separately. Codex owns normalization; chatbridge only validates and persists the candidate. For new tasks always pass `--task-spec-file` to `duet init`, which emits the compact Planner projection. Unless the user explicitly asks to skip planning, obtain a ChatGPT PLAN before editing.
+
+The local gitignored TaskSpec is semantic authority; the bound ChatGPT conversation is only a semantic cache. Stable Planner and Reviewer policy comes from the repository contracts at immutable `BASE_REF`, not repeated Browser boilerplate. Never send the complete raw request by default. Stop on `C2C_PAYLOAD_TOO_LARGE`; do not truncate, split, drop constraints, or attempt an attachment fallback. If the minimum sufficient projection cannot fit, report that a task context channel is required. Conversation unavailability remains fail closed with no automatic rebind.
 
 Use only the public Browser Bridge commands `send`, `wait`, `browser attach`, `browser detach`, and `browser doctor`. Use `chatbridge duet` for lifecycle guards. Never inspect ChatGPT DOM/selectors, invoke Playwright internals, operate Codex Desktop UI, start another Codex agent, or require Codex CLI or a Codex SDK.
 

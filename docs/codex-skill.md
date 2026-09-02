@@ -1,6 +1,6 @@
 # Codex Desktop Skill
 
-Status: **M3.0, M3.1, and M3.2a Frozen**
+Status: **M3.0, M3.1, M3.2a, and M3.2b Frozen; M3.2c Phase 1 in progress**
 
 Desktop E2E: **PASS**
 
@@ -29,7 +29,9 @@ Ordinary code questions do not trigger this side-effecting workflow. The Skill c
 
 ## What happens
 
-The Skill asks ChatGPT Web for a PLAN through the Frozen Browser Bridge before code changes. Its canonical receive path is `chatbridge wait --parse`, save the complete validated Envelope JSON, then `chatbridge duet ingest`; raw C2C remains accepted for compatibility and diagnostics. The current Codex Desktop agent performs the implementation as the only Executor. `chatbridge duet prepare-review` composes the Frozen GitHub provider to produce and push an immutable `BASE_REF..REVIEW_REF`; ChatGPT then reviews that exact range.
+For a new task, Codex preserves the raw request and normalizes a strict TaskSpecV1 without changing intent or dropping exact literals. `duet init --task-spec-file` validates and persists the local authority, then emits a compact Planner C2C/1 projection referencing `docs/contracts/planner-v1.md` at immutable `BASE_REF`. The Skill asks ChatGPT Web for a PLAN through the Frozen Browser Bridge before code changes. Its canonical receive path is `chatbridge wait --parse`, save the complete validated Envelope JSON, then `chatbridge duet ingest`; raw C2C remains accepted for compatibility and diagnostics. The current Codex Desktop agent performs the implementation as the only Executor. `chatbridge duet prepare-review` composes the Frozen GitHub provider to produce and push an immutable `BASE_REF..REVIEW_REF`, then emits a compact projection referencing `docs/contracts/reviewer-v1.md`.
+
+The raw request remains plaintext, local, and gitignored at `.chatbridge/runs/<taskId>/request.md`. TaskSpecV1 is immutable at `.chatbridge/runs/<taskId>/task-spec.json`. Exact Planner and Reviewer controls plus byte count and SHA-256 evidence are persisted per iteration. The local TaskSpec is authoritative; the bound conversation is only a semantic cache. New compact envelopes are limited to 8192 UTF-8 bytes over the complete serialized C2C message. `C2C_PAYLOAD_TOO_LARGE` stops before Browser send; content is never truncated, split, or weakened. Historical tasks without TaskSpec retain their existing envelopes and resume semantics.
 
 Generic M0 parsing is intentionally broader than M3 GITHUB lifecycle acceptance. At `duet ingest`, raw C2C and canonical parsed JSON pass through the same authoritative response-identity validation before any artifact or state mutation. Planner and Reviewer responses must echo the durable mode, repository, task branch, and `BASE_REF`; Reviewer responses must additionally echo the current reviewed `REVIEW_REF` and test status. A Reviewer `PLAN` for iteration `N+1` still identifies review `N`, not a future ref. Missing or mismatched fields fail closed and are never inferred from the run or added by Browser Bridge.
 
@@ -63,8 +65,8 @@ After post-freeze dogfood exposed blank-new-chat stabilization, send-actionabili
 - M3 overall: **IN PROGRESS**.
 - M3.1 Automatic Multi-Round Review/Fix Loop: **Frozen / Desktop E2E PASS**.
 - M3.2a Task ↔ ChatGPT Conversation Binding: **Frozen / Desktop E2E PASS**.
-- M3.2b `EXECUTING` Crash Reconciliation: **IMPLEMENTATION COMPLETE / REAL DESKTOP CRASH E2E REQUIRED**.
-- M3.2c Resume / Browser UX Hardening: **PLANNED**.
+- M3.2b `EXECUTING` Crash Reconciliation: **FROZEN / REAL DESKTOP CRASH E2E PASS**.
+- M3.2c Compact Browser Control and Resume UX: **PHASE 1 IN PROGRESS**.
 
 M3.1 builds on the frozen single-round contract. One task keeps one branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` continues automatically under the current Codex Desktop Executor, subject to deterministic guards and a configurable iteration limit. M3.1 does not add a Node agent loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).
 
@@ -79,6 +81,8 @@ New tasks default to eight iterations. `chatbridge duet init --max-iterations <n
 - At `EXECUTED`, resend the durable review envelope path returned by `chatbridge duet status`, then mark reviewing only after send succeeds.
 - At durable `REVIEWING`, a Browser wait timeout permits retrying `wait --parse` and ingest against the existing send checkpoint; it does not permit resending the review envelope or replaying Executor side effects.
 - Multiple ChatGPT tabs without an explicit current target fail closed with `CHATGPT_TAB_AMBIGUOUS`; M3.2a freezes deterministic task/conversation targeting while preserving this unscoped behavior.
+- A missing bound conversation returns `CHATGPT_CONVERSATION_UNAVAILABLE`; Phase 1 never rebinds or selects another conversation automatically.
+- `C2C_PAYLOAD_TOO_LARGE` means the minimum task projection must be reduced without losing intent or requires a future task-context channel. Do not retry it through arbitrary-size Browser transport or attachments.
 
 ## M3.2a task-aware Browser operations
 

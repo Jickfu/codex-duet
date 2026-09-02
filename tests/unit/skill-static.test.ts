@@ -29,6 +29,11 @@ describe('codex-duet Skill', () => {
     expect(text).toContain('BLOCKED');
     expect(text).toContain('duet reconcile-execution --task <taskId>');
     expect(text).toContain('duet record-tests --task <taskId>');
+    expect(text).toContain('--task-spec-file');
+    expect(text).toContain('TaskSpecV1');
+    expect(text).toContain('C2C_PAYLOAD_TOO_LARGE');
+    expect(text).toContain('semantic cache');
+    expect(text).toContain('no automatic rebind');
     expect(text).toContain('never blindly replay');
     expect(text).toContain('PREVIOUS_REVIEW_REF..REVIEW_REF');
     expect(text).not.toContain('@openai/codex-sdk');

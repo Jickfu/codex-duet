@@ -500,7 +500,7 @@ The Browser lifecycle passed `GENERIC_NEW_CHAT → first implicit send → concr
 
 The review ref `03524ac61d120ee0426d9924b937fda109e77d21` is immutable acceptance evidence, not an implementation baseline. Its task branch remains unmerged and must not be deleted, consistent with earlier M2/M3 acceptance-branch policy. Public documentation omits the actual ChatGPT conversation URL, conversation ID, message IDs, timestamps, and local profile data. Failed pre-PASS dogfood evidence remains available locally in gitignored `.chatbridge` state without publishing private metadata.
 
-Library and Playwright CLI use a bounded `[A-Za-z0-9_-]+` segment in `.../c/<conversation-id>`; wrong origins, credentials, encoded path ambiguity, traversal, and generic routes fail closed. Existing bound identity remains immutable, explicit `/` bootstrap is rejected, and final blank-chat reservation occurs inside the existing project lock. Strict process-timeout recovery remains exact-only and may conservatively return `SEND_OUTCOME_UNKNOWN`. M3.2b semantics and M3.2c scope are unchanged.
+Library and Playwright CLI use a bounded `[A-Za-z0-9_-]+` segment in `.../c/<conversation-id>`; wrong origins, credentials, encoded path ambiguity, traversal, and generic routes fail closed. Existing bound identity remains immutable, explicit `/` bootstrap is rejected, and final blank-chat reservation occurs inside the existing project lock. Strict process-timeout recovery remains exact-only and may conservatively return `SEND_OUTCOME_UNKNOWN`. M3.2b semantics remain unchanged; ADR-015 later reframes M3.2c around Compact Browser Control and Resume UX.
 
 The complete decision, alternatives, lifecycle, multiple-task example, privacy boundary, and implementation constraints are frozen in [ADR-013](../adr/ADR-013-task-conversation-binding.md).
 
@@ -518,7 +518,7 @@ Crash A preserved dirty bytes and resumed `WORKTREE_IN_PROGRESS`. Crash B adopte
 
 M3.2b replaces blind `EXECUTION_RECOVERY_REQUIRED` handling with deterministic local reconciliation. It does not add a `RECOVERING` C2C state, change `TaskState`, upgrade Frozen `DuetRunCheckpointV2`, alter ADR-012 review identity, duplicate Frozen M2, modify M3.2a conversation binding, or change the Codex sole-Executor rule.
 
-Its implementation milestone commit remains `c487a133e36552ee6448c4d89fd8c9081899ce7f`. After the M3.2a re-freeze, any fresh M3.2b Desktop crash acceptance must use the then-current main HEAD as `BASE_REF`, not the older milestone commit. Failed historical task `m3-execution-recovery-dogfood-20260902` remains preserved and must not be resumed; the next acceptance uses a fresh task.
+Its implementation milestone commit remains `c487a133e36552ee6448c4d89fd8c9081899ce7f`. The successful Crash A/B acceptance used the then-current main HEAD as `BASE_REF`, not the older milestone commit. Failed historical task `m3-execution-recovery-dogfood-20260902` remains preserved and must not be resumed.
 
 Each iteration records an immutable execution baseline and optional exact-HEAD test evidence in:
 

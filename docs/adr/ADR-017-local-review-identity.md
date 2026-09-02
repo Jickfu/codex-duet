@@ -15,6 +15,8 @@ The formal cumulative identity is `BASELINE_SNAPSHOT -> REVIEW_SNAPSHOT_N`; late
 
 The stable random `workspaceId` is stored privately with the canonical root. MCP responses never expose the absolute root or derive a public identifier from it.
 
+Both authorities use the existing recursively key-sorted UTF-8 canonical JSON contract. `snapshotId` is `SHA-256(canonicalJson(snapshot without snapshotId))`; `reviewTargetSha256` is `SHA-256(canonicalJson(review target without reviewTargetSha256))`. The self-hash field is excluded only from its own fingerprint. Readers must recompute and reject mismatches with `LOCAL_SNAPSHOT_INTEGRITY_INVALID` or `LOCAL_REVIEW_TARGET_INTEGRITY_INVALID`; schema-valid hash syntax alone is never sufficient authority.
+
 ## Snapshot and read invariants
 
 Snapshot creation enumerates the complete eligible surface, performs pre-read and post-read stability checks, stores immutable blobs, persists the manifest, then atomically publishes `snapshotId`. Source drift fails with `SNAPSHOT_SOURCE_CHANGED`; any hard limit fails with `SNAPSHOT_LIMIT_EXCEEDED`. A partial or truncated snapshot cannot be used for formal review.

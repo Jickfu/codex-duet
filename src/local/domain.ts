@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { TaskIdSchema, TestStatusSchema } from '../core/domain.js';
+import { ChatbridgeError } from '../core/errors.js';
+import { canonicalJson, sha256 } from '../duet/task-spec.js';
 
 export const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, 'Expected lowercase SHA-256');
 export const WorkspaceIdSchema = z.string().regex(/^[0-9a-f]{64}$/, 'Invalid workspace ID');
@@ -38,6 +40,7 @@ export const LocalWorkspaceSnapshotV1Schema = z
   })
   .strict();
 export type LocalWorkspaceSnapshotV1 = z.infer<typeof LocalWorkspaceSnapshotV1Schema>;
+export type LocalWorkspaceSnapshotWithoutId = Omit<LocalWorkspaceSnapshotV1, 'snapshotId'>;
 
 export const LocalReviewTargetV1Schema = z
   .object({
@@ -57,6 +60,7 @@ export const LocalReviewTargetV1Schema = z
   })
   .strict();
 export type LocalReviewTargetV1 = z.infer<typeof LocalReviewTargetV1Schema>;
+export type LocalReviewTargetWithoutFingerprint = Omit<LocalReviewTargetV1, 'reviewTargetSha256'>;
 
 export const LocalContextRefSchema = z
   .object({
@@ -67,3 +71,37 @@ export const LocalContextRefSchema = z
   })
   .strict();
 export type LocalContextRef = z.infer<typeof LocalContextRefSchema>;
+
+export function localWorkspaceSnapshotFingerprint(value: LocalWorkspaceSnapshotWithoutId): string {
+  return sha256(canonicalJson(value));
+}
+
+export function validateLocalWorkspaceSnapshotIntegrity(value: unknown): LocalWorkspaceSnapshotV1 {
+  const snapshot = LocalWorkspaceSnapshotV1Schema.parse(value);
+  const content = Object.fromEntries(
+    Object.entries(snapshot).filter(([key]) => key !== 'snapshotId'),
+  ) as LocalWorkspaceSnapshotWithoutId;
+  if (snapshot.snapshotId !== localWorkspaceSnapshotFingerprint(content))
+    throw new ChatbridgeError(
+      'LOCAL workspace snapshot fingerprint is invalid',
+      'LOCAL_SNAPSHOT_INTEGRITY_INVALID',
+    );
+  return snapshot;
+}
+
+export function localReviewTargetFingerprint(value: LocalReviewTargetWithoutFingerprint): string {
+  return sha256(canonicalJson(value));
+}
+
+export function validateLocalReviewTargetIntegrity(value: unknown): LocalReviewTargetV1 {
+  const target = LocalReviewTargetV1Schema.parse(value);
+  const content = Object.fromEntries(
+    Object.entries(target).filter(([key]) => key !== 'reviewTargetSha256'),
+  ) as LocalReviewTargetWithoutFingerprint;
+  if (target.reviewTargetSha256 !== localReviewTargetFingerprint(content))
+    throw new ChatbridgeError(
+      'LOCAL review target fingerprint is invalid',
+      'LOCAL_REVIEW_TARGET_INTEGRITY_INVALID',
+    );
+  return target;
+}

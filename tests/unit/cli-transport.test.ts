@@ -543,7 +543,10 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [message(metadataReads++ < 2 ? 'user-old' : 'user-new')],
+      $$: async (selector: string) =>
+        selector.includes('send-button')
+          ? [send]
+          : [message(metadataReads++ < 2 ? 'user-old' : 'user-new')],
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async (ms: number) => waits.push(ms),
     };
@@ -596,7 +599,8 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [message(sent ? 'user-new' : 'user-old')],
+      $$: async (selector: string) =>
+        selector.includes('send-button') ? [send] : [message(sent ? 'user-new' : 'user-old')],
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async () => undefined,
     };
@@ -619,6 +623,311 @@ describe('Playwright CLI transport', () => {
     });
     expect(trialAttempts).toBe(3);
     expect(actualClicks).toBe(1);
+  });
+
+  it('selects the second send candidate when the first candidate is disabled', async () => {
+    let disabledActualClicks = 0;
+    let liveActualClicks = 0;
+    let enterPresses = 0;
+    let sent = false;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => enterPresses++,
+    };
+    const disabled = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) throw new Error('disabled');
+        disabledActualClicks++;
+      },
+    };
+    const live = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) return;
+        liveActualClicks++;
+        sent = true;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/second-actionable',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async (selector: string) =>
+        selector.includes('send-button')
+          ? [disabled, live]
+          : [message(sent ? 'user-new' : 'user-old')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
+      waitForTimeout: async () => undefined,
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'second-actionable',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toMatchObject({
+      value: { outgoingUserMessageId: 'user-new' },
+    });
+    expect(disabledActualClicks).toBe(0);
+    expect(liveActualClicks).toBe(1);
+    expect(enterPresses).toBe(0);
+  });
+
+  it('skips a hidden stale candidate and clicks the visible send candidate', async () => {
+    let staleClicks = 0;
+    let liveActualClicks = 0;
+    let sent = false;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const stale = {
+      isVisible: async () => false,
+      click: async () => staleClicks++,
+    };
+    const live = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) return;
+        liveActualClicks++;
+        sent = true;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/stale-candidate',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async (selector: string) =>
+        selector.includes('send-button')
+          ? [stale, live]
+          : [message(sent ? 'user-new' : 'user-old')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
+      waitForTimeout: async () => undefined,
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'stale-candidate',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toMatchObject({
+      value: { outgoingUserMessageId: 'user-new' },
+    });
+    expect(staleClicks).toBe(0);
+    expect(liveActualClicks).toBe(1);
+  });
+
+  it('re-queries send candidates after dynamic node replacement', async () => {
+    let candidateQueries = 0;
+    let staleTrialAttempts = 0;
+    let liveActualClicks = 0;
+    let sent = false;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const stale = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) staleTrialAttempts++;
+        throw new Error('detached');
+      },
+    };
+    const live = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) return;
+        liveActualClicks++;
+        sent = true;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/node-replacement',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async (selector: string) => {
+        if (!selector.includes('send-button')) return [message(sent ? 'user-new' : 'user-old')];
+        candidateQueries++;
+        return candidateQueries === 1 ? [stale] : [live];
+      },
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
+      waitForTimeout: async () => undefined,
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'node-replacement',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toMatchObject({
+      value: { outgoingUserMessageId: 'user-new' },
+    });
+    expect(candidateQueries).toBeGreaterThanOrEqual(2);
+    expect(staleTrialAttempts).toBe(1);
+    expect(liveActualClicks).toBe(1);
+  });
+
+  it('fails pre-commit when every observed send candidate is non-actionable', async () => {
+    let clock = 0;
+    let actualClicks = 0;
+    let enterPresses = 0;
+    const oldUser = {
+      getAttribute: async (name: string) => (name === 'data-message-id' ? 'user-old' : 'user'),
+    };
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => enterPresses++,
+    };
+    const disabled = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) throw new Error('disabled');
+        actualClicks++;
+      },
+    };
+    const hidden = {
+      isVisible: async () => false,
+      click: async () => actualClicks++,
+    };
+    const covered = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) throw new Error('covered');
+        actualClicks++;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/all-not-ready',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async (selector: string) =>
+        selector.includes('send-button') ? [disabled, hidden, covered] : [oldUser],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
+      waitForTimeout: async () => undefined,
+    };
+    const code = buildCliOperation(
+      {
+        kind: 'commit',
+        message: 'once',
+        conversationUrl: target.url(),
+        previousUserMessageId: 'user-old',
+      },
+      'https://chatgpt.com/',
+      ['https://chatgpt.com'],
+      'all-not-ready',
+    );
+    const operation = new Function('Date', `return (${code})`)({ now: () => (clock += 1000) });
+    expect(decodedOutput(await operation(target))).toEqual({ code: 'CHATGPT_SEND_NOT_READY' });
+    expect(actualClicks).toBe(0);
+    expect(enterPresses).toBe(0);
+  });
+
+  it('fails closed when a candidate trial observes a main-frame origin escape', async () => {
+    let currentUrl = 'https://chatgpt.com/c/trial-origin';
+    let listener: ((frame: object) => void) | undefined;
+    let liveTrials = 0;
+    let actualClicks = 0;
+    const frame = {};
+    const oldUser = {
+      getAttribute: async (name: string) => (name === 'data-message-id' ? 'user-old' : 'user'),
+    };
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const escaping = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) {
+          currentUrl = 'https://example.test/escape';
+          listener?.(frame);
+          throw new Error('navigation raced');
+        }
+        actualClicks++;
+      },
+    };
+    const live = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) liveTrials++;
+        else actualClicks++;
+      },
+    };
+    const target: any = {
+      url: () => currentUrl,
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => frame,
+      on: (_event: string, value: (navigated: object) => void) => (listener = value),
+      off: vi.fn(),
+      $$: async (selector: string) =>
+        selector.includes('send-button') ? [escaping, live] : [oldUser],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
+      waitForTimeout: async () => undefined,
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: currentUrl,
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'trial-origin',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toEqual({ code: 'ORIGIN_DENIED' });
+    expect(liveTrials).toBe(0);
+    expect(actualClicks).toBe(0);
   });
 
   it('returns pre-commit not-ready without click when an observed button stays disabled', async () => {
@@ -645,7 +954,7 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [oldUser],
+      $$: async (selector: string) => (selector.includes('send-button') ? [send] : [oldUser]),
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async () => undefined,
     };
@@ -695,11 +1004,14 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [message(sent ? 'user-new' : 'user-old')],
+      $$: async (selector: string) => {
+        if (!selector.includes('send-button')) return [message(sent ? 'user-new' : 'user-old')];
+        buttonQueries++;
+        return buttonQueries < 3 ? [] : [send];
+      },
       $: async (selector: string) => {
         if (selector.includes('prompt-textarea')) return composer;
-        buttonQueries++;
-        return buttonQueries < 3 ? undefined : send;
+        return undefined;
       },
       waitForTimeout: async () => undefined,
     };
@@ -745,7 +1057,8 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [message(sent ? 'user-new' : 'user-old')],
+      $$: async (selector: string) =>
+        selector.includes('send-button') ? [] : [message(sent ? 'user-new' : 'user-old')],
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
       waitForTimeout: async () => undefined,
     };
@@ -791,7 +1104,7 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [oldUser],
+      $$: async (selector: string) => (selector.includes('send-button') ? [send] : [oldUser]),
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async () => undefined,
     };
@@ -831,7 +1144,10 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
+      $$: async (selector: string) =>
+        selector.includes('send-button')
+          ? [send]
+          : [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async (ms: number) => {
         waits.push(ms);
@@ -885,7 +1201,10 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
+      $$: async (selector: string) =>
+        selector.includes('send-button')
+          ? [send]
+          : [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async () => undefined,
     };
@@ -933,7 +1252,10 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => frame,
       on: (_event: string, value: (navigated: object) => void) => (listener = value),
       off: vi.fn(),
-      $$: async () => [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
+      $$: async (selector: string) =>
+        selector.includes('send-button')
+          ? [send]
+          : [message(metadataReads++ === 0 ? 'user-old' : 'user-new')],
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async () => {
         currentUrl = 'https://example.test/escape';
@@ -1189,7 +1511,7 @@ describe('Playwright CLI transport', () => {
       mainFrame: () => ({}),
       on: vi.fn(),
       off: vi.fn(),
-      $$: async () => [oldUser],
+      $$: async (selector: string) => (selector.includes('send-button') ? [send] : [oldUser]),
       $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
       waitForTimeout: async () => undefined,
     };

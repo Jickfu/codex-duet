@@ -128,6 +128,81 @@ describe('ChatGPT adapter fixture', () => {
     expect(actualClicks).toBe(1);
     await isolated.close();
   });
+  it('selects a later actionable send candidate when the first match is disabled', async () => {
+    const isolated = await browser.newContext();
+    let disabledClicks = 0;
+    let liveClicks = 0;
+    await isolated.exposeFunction('recordDisabledClick', () => disabledClicks++);
+    await isolated.exposeFunction('recordLiveClick', () => liveClicks++);
+    await isolated.route('https://chatgpt.com/c/later-actionable', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button data-testid="send-button" disabled onclick="recordDisabledClick()">Stale</button><button aria-label="Send prompt" id="live">Send</button><script>live.onclick=()=>{recordLiveClick();const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-live';messages.append(user)}</script>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/later-actionable');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    expect(await adapter.sendMessage('hello')).toMatchObject({
+      outgoingUserMessageId: 'user-live',
+    });
+    expect(disabledClicks).toBe(0);
+    expect(liveClicks).toBe(1);
+    await isolated.close();
+  });
+  it('skips a hidden stale send candidate before the visible live candidate', async () => {
+    const isolated = await browser.newContext();
+    let staleClicks = 0;
+    let liveClicks = 0;
+    await isolated.exposeFunction('recordStaleClick', () => staleClicks++);
+    await isolated.exposeFunction('recordLiveClick', () => liveClicks++);
+    await isolated.route('https://chatgpt.com/c/hidden-stale', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button data-testid="send-button" style="display:none" onclick="recordStaleClick()">Stale</button><button aria-label="Send prompt" id="live">Send</button><script>live.onclick=()=>{recordLiveClick();const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-live';messages.append(user)}</script>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/hidden-stale');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    expect(await adapter.sendMessage('hello')).toMatchObject({
+      outgoingUserMessageId: 'user-live',
+    });
+    expect(staleClicks).toBe(0);
+    expect(liveClicks).toBe(1);
+    await isolated.close();
+  });
+  it('re-queries send candidates after a non-actionable node is replaced', async () => {
+    const isolated = await browser.newContext();
+    let staleClicks = 0;
+    let liveClicks = 0;
+    await isolated.exposeFunction('recordStaleClick', () => staleClicks++);
+    await isolated.exposeFunction('recordLiveClick', () => liveClicks++);
+    await isolated.route('https://chatgpt.com/c/replaced-send', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true" oninput="setTimeout(()=>{stale.remove();const live=document.createElement('button');live.setAttribute('aria-label','Send prompt');live.onclick=()=>{recordLiveClick();const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-live';messages.append(user)};document.body.append(live)},120)"></div><button data-testid="send-button" id="stale" disabled onclick="recordStaleClick()">Stale</button>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/replaced-send');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    expect(await adapter.sendMessage('hello')).toMatchObject({
+      outgoingUserMessageId: 'user-live',
+    });
+    expect(staleClicks).toBe(0);
+    expect(liveClicks).toBe(1);
+    await isolated.close();
+  });
   it('fails pre-commit when an observed send button never becomes actionable', async () => {
     const isolated = await browser.newContext();
     let actualClicks = 0;

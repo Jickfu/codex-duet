@@ -282,18 +282,18 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
     let observedButton = false;
     while (Date.now() < deadline) {
       guard.assertValid();
-      const send = await guard.run(() => this.requiredPage().$(CHATGPT_SEND_SELECTOR));
-      if (send) {
-        observedButton = true;
-        if (await guard.run(() => send.isVisible())) {
+      const candidates = await guard.run(() => this.requiredPage().$$(CHATGPT_SEND_SELECTOR));
+      if (candidates.length > 0) observedButton = true;
+      for (const candidate of candidates) {
+        if (await guard.run(() => candidate.isVisible())) {
           try {
             await guard.run(() =>
-              send.click({
+              candidate.click({
                 trial: true,
                 timeout: Math.max(1, Math.min(250, deadline - Date.now())),
               }),
             );
-            return { kind: 'button', handle: send };
+            return { kind: 'button', handle: candidate };
           } catch (error) {
             guard.assertValid();
             if (error instanceof ChatbridgeError) throw error;

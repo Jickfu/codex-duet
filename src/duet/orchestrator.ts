@@ -204,12 +204,18 @@ export class DuetOrchestrator {
   }
 
   async ingest(taskIdInput: string, messageFile: string): Promise<DuetRunCheckpointV2> {
+    return this.ingestContent(taskIdInput, await readFile(messageFile, 'utf8'));
+  }
+
+  async ingestContent(
+    taskIdInput: string,
+    message: string,
+    allowAppliedReplay = false,
+  ): Promise<DuetRunCheckpointV2> {
     const run = await this.requireMutableRun(taskIdInput);
-    this.requireNoHalt(run);
-    if (run.state === 'PLANNING') await this.discussion?.assertPlannerAllowed(run.taskId);
     let envelope: Envelope;
     try {
-      envelope = parseIngestEnvelope(await readFile(messageFile, 'utf8'));
+      envelope = parseIngestEnvelope(message);
     } catch (error) {
       throw new ChatbridgeError(
         error instanceof Error ? error.message : 'Invalid C2C response',
@@ -218,6 +224,9 @@ export class DuetOrchestrator {
     }
     if (envelope.taskId !== run.taskId)
       throw new ChatbridgeError('C2C task does not match run', 'TASK_MISMATCH');
+    if (allowAppliedReplay && isAlreadyApplied(run, envelope)) return run;
+    this.requireNoHalt(run);
+    if (run.state === 'PLANNING') await this.discussion?.assertPlannerAllowed(run.taskId);
     assertGitHubResponseIdentity(run, envelope);
     const expectedIteration =
       run.state === 'REVIEWING' && envelope.state === 'PLAN' ? run.iteration + 1 : run.iteration;
@@ -894,6 +903,10 @@ function allowedResponse(from: TaskState, to: TaskState): boolean {
   if (from === 'PLANNING') return ['PLAN', 'BLOCKED', 'FAILED'].includes(to);
   if (from === 'REVIEWING') return ['DONE', 'PLAN', 'BLOCKED', 'FAILED'].includes(to);
   return false;
+}
+
+function isAlreadyApplied(run: DuetRunCheckpointV2, envelope: Envelope): boolean {
+  return run.state === envelope.state && run.iteration === envelope.iteration;
 }
 
 function resumeInstruction(state: TaskState): string {

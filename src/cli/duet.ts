@@ -19,6 +19,9 @@ import { DiscussionService } from '../duet/discussion-service.js';
 import { loadConfig } from '../config/config.js';
 import { TaskBrowserStore } from '../browser/task-browser-store.js';
 import { ConversationBindingLock } from '../browser/conversation-binding-lock.js';
+import { ResponseIngressService } from '../duet/response-ingress.js';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 
 function orchestrator(): DuetOrchestrator {
   const cwd = process.cwd();
@@ -104,7 +107,25 @@ export async function duetInit(
 
 export async function duetIngest(task: string, messageFile: string): Promise<void> {
   await interactionServices().interaction.assertCodexBrowserInbound(task, messageFile);
-  console.log(JSON.stringify(await orchestrator().ingest(task, messageFile), null, 2));
+  const stateRoot = path.join(process.cwd(), '.chatbridge');
+  const runs = new DuetRunStore(stateRoot);
+  const run = await runs.read(task);
+  if (!run || run.version !== 2) throw new Error('Response ingress requires a V2 duet run');
+  const role = run.state === 'PLANNING' ? 'planner-control.txt' : 'reviewer-control.txt';
+  const control = await readFile(runs.iterationArtifactPath(task, run.iteration, role), 'utf8');
+  const response = await readFile(messageFile, 'utf8');
+  const duet = orchestrator();
+  const ingress = new ResponseIngressService(stateRoot, async (request) => {
+    await duet.ingestContent(request.taskId, request.response, true);
+  });
+  const accepted = await ingress.accept({
+    taskId: task,
+    iteration: run.iteration,
+    controlSha256: createHash('sha256').update(control).digest('hex'),
+    response,
+    source: 'BROWSER',
+  });
+  console.log(JSON.stringify({ ...accepted, run: await duet.status(task) }, null, 2));
 }
 
 export async function duetBeginExecution(task: string): Promise<void> {

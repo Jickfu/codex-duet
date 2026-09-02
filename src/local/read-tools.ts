@@ -6,6 +6,7 @@ import { LocalWorkspaceService } from './workspace-service.js';
 
 const Bound = { taskId: TaskIdSchema, snapshotId: SnapshotIdSchema };
 const BoundSchema = z.object(Bound).strict();
+const EvidenceBoundSchema = z.object({ ...Bound, iteration: z.number().int().positive() }).strict();
 const PathSchema = z.string().min(1);
 const ChunkSchema = z
   .object({
@@ -65,8 +66,8 @@ export function createLocalReadTools(service: LocalWorkspaceService) {
     ),
     git_status: tool(ChunkSchema, (input) => service.gitStatus(input)),
     git_diff: tool(ChunkSchema, (input) => service.gitDiff(input)),
-    test_status: tool(BoundSchema, (input) => service.testStatus(input)),
-    execution_summary: tool(BoundSchema, (input) => service.executionSummary(input)),
+    test_status: tool(EvidenceBoundSchema, (input) => service.testStatus(input)),
+    execution_summary: tool(EvidenceBoundSchema, (input) => service.executionSummary(input)),
   } satisfies Record<LocalReadToolName, LocalReadToolDefinition<any>>;
 }
 

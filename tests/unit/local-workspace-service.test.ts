@@ -11,7 +11,10 @@ import {
   localSnapshotSurfaceManifestFingerprint,
   type LocalSnapshotManifestV1,
 } from '../../src/local/snapshot-store.js';
-import { LocalWorkspaceService } from '../../src/local/workspace-service.js';
+import {
+  LocalWorkspaceService,
+  serializeLocalGitArtifact,
+} from '../../src/local/workspace-service.js';
 import { createLocalReadTools, LOCAL_READ_TOOL_NAMES } from '../../src/local/read-tools.js';
 
 const roots: string[] = [];
@@ -23,8 +26,22 @@ async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'workspace-service-'));
   roots.push(root);
   const store = new LocalSnapshotStore(path.join(root, '.chatbridge'));
-  const status = await store.putBlob(Buffer.from(' M src/a.txt\n'));
-  const diff = await store.putBlob(Buffer.from('diff --git a/src/a.txt b/src/a.txt\n'));
+  const status = await store.putBlob(
+    serializeLocalGitArtifact({
+      version: 1,
+      kind: 'STATUS',
+      paths: ['src/a.txt'],
+      contentBase64: Buffer.from(' M src/a.txt\n').toString('base64'),
+    }),
+  );
+  const diff = await store.putBlob(
+    serializeLocalGitArtifact({
+      version: 1,
+      kind: 'DIFF',
+      paths: ['src/a.txt'],
+      contentBase64: Buffer.from('diff --git a/src/a.txt b/src/a.txt\n').toString('base64'),
+    }),
+  );
   const a = await store.putBlob(Buffer.from('alpha\nneedle one\n'));
   const b = await store.putBlob(Buffer.from('needle two\n'));
   const entries = [
@@ -111,6 +128,7 @@ describe('snapshot-bound LOCAL workspace service', () => {
           version: 1,
           taskId: 'other',
           snapshotId: snapshot.snapshotId,
+          iteration: 1,
           status: 'PASS',
           summary: 'ok',
           recordedAt: new Date(0).toISOString(),
@@ -127,10 +145,15 @@ describe('snapshot-bound LOCAL workspace service', () => {
       },
     });
     await expect(service.workspaceInfo({ ...bound, taskId: 'other' })).rejects.toThrow();
-    await expect(service.testStatus(bound)).rejects.toMatchObject({
+    await expect(service.testStatus({ ...bound, iteration: 1 })).rejects.toMatchObject({
       code: 'LOCAL_EVIDENCE_IDENTITY_MISMATCH',
     });
-    await expect(service.executionSummary(bound)).resolves.toMatchObject({ summary: 'done' });
+    await expect(service.executionSummary({ ...bound, iteration: 2 })).rejects.toMatchObject({
+      code: 'LOCAL_EVIDENCE_IDENTITY_MISMATCH',
+    });
+    await expect(service.executionSummary({ ...bound, iteration: 1 })).resolves.toMatchObject({
+      summary: 'done',
+    });
 
     const secretBytes = Buffer.from('secret');
     const secretSha = await store.putBlob(secretBytes);
@@ -154,6 +177,32 @@ describe('snapshot-bound LOCAL workspace service', () => {
     await store.publish({ ...manifest, snapshot: secretSnapshot, entries });
     await expect(
       service.listDirectory({ taskId: 'demo', snapshotId: secretSnapshot.snapshotId }),
+    ).rejects.toMatchObject({ code: 'LOCAL_SENSITIVE_PATH_UNREVIEWABLE' });
+
+    const unsafeDiff = await store.putBlob(
+      serializeLocalGitArtifact({
+        version: 1,
+        kind: 'DIFF',
+        paths: ['.env'],
+        contentBase64: Buffer.from('API_KEY=secret\n').toString('base64'),
+      }),
+    );
+    const unsafeContent: LocalWorkspaceSnapshotWithoutId = {
+      ...withoutId,
+      surface: manifest.snapshot.surface,
+      artifacts: { ...withoutId.artifacts, gitDiffSha256: unsafeDiff },
+    };
+    const unsafeSnapshot = {
+      ...unsafeContent,
+      snapshotId: localWorkspaceSnapshotFingerprint(unsafeContent),
+    };
+    await store.publish({
+      ...manifest,
+      snapshot: unsafeSnapshot,
+      gitDiffBlobSha256: unsafeDiff,
+    });
+    await expect(
+      service.gitDiff({ taskId: 'demo', snapshotId: unsafeSnapshot.snapshotId }),
     ).rejects.toMatchObject({ code: 'LOCAL_SENSITIVE_PATH_UNREVIEWABLE' });
   });
 });

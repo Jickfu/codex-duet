@@ -701,6 +701,7 @@ describe('Playwright CLI transport', () => {
   });
   it('preflights a disabled button until actionable and clicks exactly once', async () => {
     let trialAttempts = 0;
+    const trialTimeouts: number[] = [];
     let actualClicks = 0;
     let sent = false;
     const message = (id: string) => ({
@@ -713,9 +714,10 @@ describe('Playwright CLI transport', () => {
     };
     const send = {
       isVisible: async () => true,
-      click: async (options?: { trial?: boolean }) => {
+      click: async (options?: { trial?: boolean; timeout?: number }) => {
         if (options?.trial) {
           trialAttempts++;
+          trialTimeouts.push(options.timeout ?? 0);
           if (trialAttempts < 3) throw new Error('not actionable');
           return;
         }
@@ -752,6 +754,7 @@ describe('Playwright CLI transport', () => {
       value: { outgoingUserMessageId: 'user-new' },
     });
     expect(trialAttempts).toBe(3);
+    expect(trialTimeouts.every((timeout) => timeout > 250)).toBe(true);
     expect(actualClicks).toBe(1);
   });
 

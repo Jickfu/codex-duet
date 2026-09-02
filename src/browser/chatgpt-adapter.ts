@@ -287,10 +287,14 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
       for (const candidate of candidates) {
         if (await guard.run(() => candidate.isVisible())) {
           try {
+            const trialTimeout = Math.max(
+              1,
+              Math.min(2_000, Math.floor((deadline - Date.now()) / candidates.length)),
+            );
             await guard.run(() =>
               candidate.click({
                 trial: true,
-                timeout: Math.max(1, Math.min(250, deadline - Date.now())),
+                timeout: trialTimeout,
               }),
             );
             return { kind: 'button', handle: candidate };

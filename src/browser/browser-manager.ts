@@ -75,7 +75,10 @@ export async function attachBrowser(
   const previous = await store.read();
   if (previous?.transport === 'cli')
     await runner.run([`--session=${previous.session!}`, 'detach'], 5000).catch(() => undefined);
-  if (options.browser === 'bundled' && (options.transport === 'extension' || options.endpoint))
+  if (
+    options.browser === 'bundled' &&
+    (options.transport === 'extension' || options.transport === 'cdp' || options.endpoint)
+  )
     throw new ChatbridgeError(
       'Bundled browser cannot be selected as an existing-browser transport',
       'INVALID_BROWSER_TRANSPORT',
@@ -97,10 +100,14 @@ export async function attachBrowser(
         'EXTENSION_UNAVAILABLE',
       );
   }
-  if (!options.endpoint && (options.transport === 'auto' || options.transport === 'cdp')) {
+  const channelCandidates = channels(options.browser);
+  if (
+    !options.endpoint &&
+    channelCandidates.length > 0 &&
+    (options.transport === 'auto' || options.transport === 'cdp')
+  ) {
     const authorizationDeadline = timing.now() + CHANNEL_CDP_AUTHORIZATION_GRACE_MS;
     let lastFailureCode = 'PLAYWRIGHT_CLI_FAILED';
-    const channelCandidates = channels(options.browser);
     while (timing.now() < authorizationDeadline) {
       for (const browser of channelCandidates) {
         if (timing.now() >= authorizationDeadline) break;

@@ -107,6 +107,24 @@ describe('native existing-session selection', () => {
     );
     expect(h.timing.delay).not.toHaveBeenCalled();
   });
+  it('preserves Edge channel CDP authorization grace semantics', async () => {
+    let attempts = 0;
+    const h = harness((args) => {
+      if (!args.includes('--cdp=msedge')) return false;
+      attempts += 1;
+      return attempts === 2;
+    });
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'msedge', transport: 'cdp' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result).toMatchObject({ mode: 'existing-channel-cdp', browser: 'msedge' });
+    expect(h.timing.delay).toHaveBeenCalledTimes(1);
+  });
   it('bounds explicit channel CDP authorization and cleans every failed attempt', async () => {
     const h = harness(() => false);
     await expect(
@@ -262,12 +280,29 @@ describe('native existing-session selection', () => {
     h.detection.bundled = vi.fn(async () => true);
     const result = await attachBrowser(
       loadConfig(),
-      { browser: 'auto', transport: 'auto' },
+      { browser: 'bundled', transport: 'auto' },
       h.runner,
       h.detection,
       h.store,
       h.timing,
     );
     expect(result.mode).toBe('bundled');
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('attach'))).toHaveLength(0);
+    expect(h.timing.delay).not.toHaveBeenCalled();
+  });
+  it('rejects bundled channel CDP before attach or authorization delay', async () => {
+    const h = harness(() => false);
+    await expect(
+      attachBrowser(
+        loadConfig(),
+        { browser: 'bundled', transport: 'cdp' },
+        h.runner,
+        h.detection,
+        h.store,
+        h.timing,
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_BROWSER_TRANSPORT' });
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('attach'))).toHaveLength(0);
+    expect(h.timing.delay).not.toHaveBeenCalled();
   });
 });

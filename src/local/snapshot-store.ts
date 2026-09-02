@@ -24,7 +24,6 @@ export const LocalSnapshotManifestV1Schema = z
   .object({
     version: z.literal(1),
     taskId: TaskIdSchema,
-    purpose: z.enum(['BASELINE', 'REVIEW']),
     snapshot: LocalWorkspaceSnapshotV1Schema,
     entries: z.array(SnapshotEntrySchema),
     gitStatusBlobSha256: Sha256Schema,

@@ -54,6 +54,9 @@ describe('LOCAL path and sensitive-file policy', () => {
       '.aws/credentials',
       '.azure/profile.json',
       '.config/gcloud/application_default_credentials.json',
+      'infra/.aws/credentials',
+      'tools/.azure/profile.json',
+      'sandbox/.config/gcloud/access_tokens.db',
       'credentials.json',
       '.npmrc',
       '.git/config',
@@ -118,7 +121,6 @@ describe('LOCAL immutable snapshot store', () => {
     const manifest: LocalSnapshotManifestV1 = {
       version: 1,
       taskId: 'demo',
-      purpose: 'BASELINE',
       snapshot,
       entries,
       gitStatusBlobSha256: emptySha,
@@ -127,9 +129,6 @@ describe('LOCAL immutable snapshot store', () => {
     await store.publish(manifest);
     await expect(store.publish(manifest)).resolves.toBeUndefined();
     expect(await store.read('demo', snapshot.snapshotId)).toEqual(manifest);
-    await expect(store.publish({ ...manifest, purpose: 'REVIEW' })).rejects.toMatchObject({
-      code: 'LOCAL_SNAPSHOT_IMMUTABLE',
-    });
 
     const snapshotFile = path.join(
       root,
@@ -188,7 +187,6 @@ describe('LOCAL immutable snapshot store', () => {
       store.publish({
         version: 1,
         taskId: 'bad',
-        purpose: 'REVIEW',
         snapshot,
         entries,
         gitStatusBlobSha256: blobSha,

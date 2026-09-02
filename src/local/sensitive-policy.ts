@@ -11,8 +11,12 @@ export function isSensitiveWorkspacePath(relativePath: string): boolean {
   const lower = parts.map((part) => part.toLowerCase());
   if (lower.includes('.git') || lower.includes('.chatbridge') || lower.includes('.ssh'))
     return true;
-  if (lower[0] === '.azure') return true;
-  if (lower[0] === '.aws' && lower[1] === 'credentials') return true;
-  if (lower[0] === '.config' && lower[1] === 'gcloud') return true;
+  if (lower.includes('.azure')) return true;
+  if (containsSequence(lower, ['.aws', 'credentials'])) return true;
+  if (containsSequence(lower, ['.config', 'gcloud'])) return true;
   return FILE_DENY.some((pattern) => pattern.test(parts.at(-1) ?? ''));
+}
+
+function containsSequence(parts: string[], sequence: string[]): boolean {
+  return parts.some((_, index) => sequence.every((part, offset) => parts[index + offset] === part));
 }

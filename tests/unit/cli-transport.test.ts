@@ -566,6 +566,252 @@ describe('Playwright CLI transport', () => {
     });
     expect(waits).toEqual([50]);
   });
+  it('preflights a disabled button until actionable and clicks exactly once', async () => {
+    let trialAttempts = 0;
+    let actualClicks = 0;
+    let sent = false;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) {
+          trialAttempts++;
+          if (trialAttempts < 3) throw new Error('not actionable');
+          return;
+        }
+        actualClicks++;
+        sent = true;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/ready',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [message(sent ? 'user-new' : 'user-old')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async () => undefined,
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'disabled-ready',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toMatchObject({
+      value: { outgoingUserMessageId: 'user-new' },
+    });
+    expect(trialAttempts).toBe(3);
+    expect(actualClicks).toBe(1);
+  });
+
+  it('returns pre-commit not-ready without click when an observed button stays disabled', async () => {
+    let clock = 0;
+    let actualClicks = 0;
+    const oldUser = {
+      getAttribute: async (name: string) => (name === 'data-message-id' ? 'user-old' : 'user'),
+    };
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) throw new Error('disabled');
+        actualClicks++;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/not-ready',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [oldUser],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async () => undefined,
+    };
+    const code = buildCliOperation(
+      {
+        kind: 'commit',
+        message: 'once',
+        conversationUrl: target.url(),
+        previousUserMessageId: 'user-old',
+      },
+      'https://chatgpt.com/',
+      ['https://chatgpt.com'],
+      'never-actionable',
+    );
+    const operation = new Function('Date', `return (${code})`)({ now: () => (clock += 1000) });
+    expect(decodedOutput(await operation(target))).toEqual({ code: 'CHATGPT_SEND_NOT_READY' });
+    expect(actualClicks).toBe(0);
+  });
+
+  it('waits for an asynchronously appearing button instead of pressing Enter', async () => {
+    let buttonQueries = 0;
+    let actualClicks = 0;
+    let enterPresses = 0;
+    let sent = false;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => {
+        enterPresses++;
+      },
+    };
+    const send = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (!options?.trial) {
+          actualClicks++;
+          sent = true;
+        }
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/async',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [message(sent ? 'user-new' : 'user-old')],
+      $: async (selector: string) => {
+        if (selector.includes('prompt-textarea')) return composer;
+        buttonQueries++;
+        return buttonQueries < 3 ? undefined : send;
+      },
+      waitForTimeout: async () => undefined,
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'async-button',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toMatchObject({
+      value: { outgoingUserMessageId: 'user-new' },
+    });
+    expect(actualClicks).toBe(1);
+    expect(enterPresses).toBe(0);
+  });
+
+  it('preserves keyboard fallback when no button appears in the readiness window', async () => {
+    let clock = 0;
+    let enterPresses = 0;
+    let sent = false;
+    const message = (id: string) => ({
+      getAttribute: async (name: string) => (name === 'data-message-id' ? id : 'user'),
+    });
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => {
+        enterPresses++;
+        sent = true;
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/keyboard',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [message(sent ? 'user-new' : 'user-old')],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : undefined),
+      waitForTimeout: async () => undefined,
+    };
+    const code = buildCliOperation(
+      {
+        kind: 'commit',
+        message: 'once',
+        conversationUrl: target.url(),
+        previousUserMessageId: 'user-old',
+      },
+      'https://chatgpt.com/',
+      ['https://chatgpt.com'],
+      'keyboard-fallback',
+    );
+    const operation = new Function('Date', `return (${code})`)({ now: () => (clock += 6000) });
+    expect(decodedOutput(await operation(target))).toMatchObject({
+      value: { outgoingUserMessageId: 'user-new' },
+    });
+    expect(enterPresses).toBe(1);
+  });
+
+  it('keeps actual-click failure after trial inside observer recovery semantics', async () => {
+    let actualClicks = 0;
+    const oldUser = {
+      getAttribute: async (name: string) => (name === 'data-message-id' ? 'user-old' : 'user'),
+    };
+    const composer = {
+      isVisible: async () => true,
+      fill: async () => undefined,
+      press: async () => undefined,
+    };
+    const send = {
+      isVisible: async () => true,
+      click: async (options?: { trial?: boolean }) => {
+        if (options?.trial) return;
+        actualClicks++;
+        throw new Error('actionability raced');
+      },
+    };
+    const target: any = {
+      url: () => 'https://chatgpt.com/c/click-race',
+      context: () => ({ pages: () => [target] }),
+      mainFrame: () => ({}),
+      on: vi.fn(),
+      off: vi.fn(),
+      $$: async () => [oldUser],
+      $: async (selector: string) => (selector.includes('prompt-textarea') ? composer : send),
+      waitForTimeout: async () => undefined,
+    };
+    const output = await executeRestricted(
+      buildCliOperation(
+        {
+          kind: 'commit',
+          message: 'once',
+          conversationUrl: target.url(),
+          previousUserMessageId: 'user-old',
+        },
+        'https://chatgpt.com/',
+        ['https://chatgpt.com'],
+        'actual-click-race',
+      ),
+      target,
+    );
+    expect(decodedOutput(output)).toEqual({ code: 'SEND_OBSERVER_FAILED' });
+    expect(actualClicks).toBe(1);
+  });
   it('waits for a concrete conversation URL after observing the outgoing ID', async () => {
     const waits: number[] = [];
     let currentUrl = 'https://chatgpt.com/';
@@ -628,8 +874,8 @@ describe('Playwright CLI transport', () => {
     };
     const send = {
       isVisible: async () => true,
-      click: async () => {
-        clicks++;
+      click: async (options?: { trial?: boolean }) => {
+        if (!options?.trial) clicks++;
       },
     };
     let metadataReads = 0;
@@ -677,8 +923,8 @@ describe('Playwright CLI transport', () => {
     };
     const send = {
       isVisible: async () => true,
-      click: async () => {
-        clicks++;
+      click: async (options?: { trial?: boolean }) => {
+        if (!options?.trial) clicks++;
       },
     };
     const target: any = {
@@ -732,6 +978,30 @@ describe('Playwright CLI transport', () => {
     await session.connect();
     await expect(session.sendMessage('message')).rejects.toMatchObject({
       code: 'SEND_CHECKPOINT_PERSIST_FAILED',
+    });
+    expect(operations).toEqual(['ensure', 'prepare', 'commit']);
+  });
+
+  it('does not attempt CLI recovery for pre-commit send-not-ready', async () => {
+    const target = 'https://chatgpt.com/c/not-ready';
+    const operations: string[] = [];
+    const run = vi.fn(async (args: readonly string[]) => {
+      const kind = String(args[2]).match(/"kind":"([^"]+)"/)?.[1] ?? '';
+      operations.push(kind);
+      const response =
+        kind === 'ensure'
+          ? encoded(args, { value: { conversationUrl: target } })
+          : kind === 'prepare'
+            ? encoded(args, { value: { conversationUrl: target } })
+            : encoded(args, { code: 'CHATGPT_SEND_NOT_READY' }, 'ERROR');
+      return { stdout: response, stderr: '' };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'stable', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await session.connect({ conversationUrl: target });
+    await expect(session.sendMessage('message')).rejects.toMatchObject({
+      code: 'CHATGPT_SEND_NOT_READY',
     });
     expect(operations).toEqual(['ensure', 'prepare', 'commit']);
   });
@@ -909,8 +1179,8 @@ describe('Playwright CLI transport', () => {
     };
     const send = {
       isVisible: async () => true,
-      click: async () => {
-        clicks++;
+      click: async (options?: { trial?: boolean }) => {
+        if (!options?.trial) clicks++;
       },
     };
     const target: any = {

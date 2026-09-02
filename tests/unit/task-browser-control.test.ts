@@ -151,13 +151,23 @@ describe('task-aware Browser control', () => {
     expect((await x.store.read('task-a'))?.conversation.url).not.toBe('https://chatgpt.com/c/two');
   });
 
-  it('persists the post-send stable identity from a blank bootstrap and waits on it', async () => {
+  it('persists and waits on C1 after blank bootstrap send readiness becomes actionable', async () => {
     const x = await fixture('https://chatgpt.com/');
     await x.runs.write(run('task-a'));
-    x.sends.mockResolvedValueOnce({
-      conversationUrl: 'https://chatgpt.com/c/new-conversation',
-      outgoingUserMessageId: 'user_new',
-      previousAssistantMessageId: 'assistant_old',
+    const sendBoundary: string[] = [];
+    x.sends.mockImplementationOnce(async () => {
+      sendBoundary.push(
+        'filled',
+        'button-not-ready',
+        'button-ready',
+        'actual-click',
+        'outgoing-id',
+      );
+      return {
+        conversationUrl: 'https://chatgpt.com/c/new-conversation',
+        outgoingUserMessageId: 'user_new',
+        previousAssistantMessageId: 'assistant_old',
+      };
     });
     const reservation = vi.spyOn(ConversationReservationService.prototype, 'assertAvailable');
     await taskAwareSend('message', 'task-a', undefined, x.dependencies);
@@ -172,6 +182,13 @@ describe('task-aware Browser control', () => {
     );
     await taskAwareWait('task-a', 10, x.dependencies);
     expect(x.connects).toEqual([undefined, 'https://chatgpt.com/c/new-conversation']);
+    expect(sendBoundary).toEqual([
+      'filled',
+      'button-not-ready',
+      'button-ready',
+      'actual-click',
+      'outgoing-id',
+    ]);
   });
 
   it('rejects a generic explicit bootstrap before connect or send', async () => {

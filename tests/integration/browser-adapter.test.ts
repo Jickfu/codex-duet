@@ -106,6 +106,97 @@ describe('ChatGPT adapter fixture', () => {
     expect(await page.evaluate(() => (window as any).sent)).toBe('hello');
     await page.close();
   });
+  it('waits for a disabled send button to become actionable before one actual click', async () => {
+    const isolated = await browser.newContext();
+    let actualClicks = 0;
+    await isolated.exposeFunction('recordActualClick', () => actualClicks++);
+    await isolated.route('https://chatgpt.com/c/disabled-ready', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true" oninput="setTimeout(()=>send.disabled=false,120)"></div><button aria-label="Send prompt" id="send" disabled>Send</button><script>send.onclick=()=>{recordActualClick();const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-ready';messages.append(user)}</script>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/disabled-ready');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    expect(await adapter.sendMessage('hello')).toMatchObject({
+      outgoingUserMessageId: 'user-ready',
+    });
+    expect(actualClicks).toBe(1);
+    await isolated.close();
+  });
+  it('fails pre-commit when an observed send button never becomes actionable', async () => {
+    const isolated = await browser.newContext();
+    let actualClicks = 0;
+    await isolated.exposeFunction('recordActualClick', () => actualClicks++);
+    await isolated.route('https://chatgpt.com/c/never-ready', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true"></div><button aria-label="Send prompt" id="send" disabled onclick="recordActualClick()">Send</button>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/never-ready');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 150, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    await expect(adapter.sendMessage('hello')).rejects.toMatchObject({
+      code: 'CHATGPT_SEND_NOT_READY',
+    });
+    expect(actualClicks).toBe(0);
+    await isolated.close();
+  });
+  it('waits for an asynchronously appearing send button instead of pressing Enter', async () => {
+    const isolated = await browser.newContext();
+    let actualClicks = 0;
+    let enterPresses = 0;
+    await isolated.exposeFunction('recordActualClick', () => actualClicks++);
+    await isolated.exposeFunction('recordEnter', () => enterPresses++);
+    await isolated.route('https://chatgpt.com/c/async-button', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true" onkeydown="if(event.key==='Enter')recordEnter()" oninput="setTimeout(()=>{const button=document.createElement('button');button.setAttribute('aria-label','Send prompt');button.onclick=()=>{recordActualClick();const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-async';messages.append(user)};document.body.append(button)},120)"></div>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/async-button');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 1000, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    expect(await adapter.sendMessage('hello')).toMatchObject({
+      outgoingUserMessageId: 'user-async',
+    });
+    expect(actualClicks).toBe(1);
+    expect(enterPresses).toBe(0);
+    await isolated.close();
+  });
+  it('preserves Enter fallback when no send button exists during the readiness window', async () => {
+    const isolated = await browser.newContext();
+    let enterPresses = 0;
+    await isolated.exposeFunction('recordEnter', () => enterPresses++);
+    await isolated.route('https://chatgpt.com/c/keyboard-fallback', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<div id="messages"></div><div id="prompt-textarea" role="textbox" contenteditable="true" onkeydown="if(event.key==='Enter'){recordEnter();const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId='user-keyboard';messages.append(user)}"></div>`,
+      }),
+    );
+    const page = await isolated.newPage();
+    await page.goto('https://chatgpt.com/c/keyboard-fallback');
+    const adapter = new PlaywrightChatGPTWebAdapter(isolated, 'https://chatgpt.com/', 150, false, [
+      'https://chatgpt.com',
+    ]);
+    await adapter.connect();
+    expect(await adapter.sendMessage('hello')).toMatchObject({
+      outgoingUserMessageId: 'user-keyboard',
+    });
+    expect(enterPresses).toBe(1);
+    await isolated.close();
+  });
   it('waits for a concrete URL after the outgoing ID appears on a blank new chat', async () => {
     const isolated = await browser.newContext();
     await isolated.route('https://chatgpt.com/', (route) =>

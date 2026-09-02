@@ -103,8 +103,10 @@ export function buildCliOperation(
       if(c.operation.kind==='commit'){
         const beforeCommit=await step(()=>metadata(target));if(beforeCommit.some(item=>!item.id))fail('CHATGPT_MESSAGE_ID_UNAVAILABLE');
         const composer=await poll(async()=>{const item=await step(()=>target.$(c.selectors.composer));return item&&await step(()=>item.isVisible())?item:undefined},10000);
-        await step(()=>composer.fill(c.operation.message));const send=await step(()=>target.$(c.selectors.send));
-        if(send&&await step(()=>send.isVisible())){sendLifecycle='COMMIT_ATTEMPTED';await step(()=>send.click({noWaitAfter:true,timeout:10000}))}else{sendLifecycle='COMMIT_ATTEMPTED';await step(()=>composer.press('Enter'))}
+        await step(()=>composer.fill(c.operation.message));
+        const prepareSend=async()=>{const deadline=Date.now()+10000;let observed=false;while(Date.now()<deadline){const send=await step(()=>target.$(c.selectors.send));if(send){observed=true;if(await step(()=>send.isVisible())){try{await step(()=>send.click({trial:true,timeout:Math.max(1,Math.min(250,deadline-Date.now()))}));return {kind:'button',handle:send}}catch(error){guard()}}}await delay(50)}if(observed)fail('CHATGPT_SEND_NOT_READY');return {kind:'keyboard',handle:composer}};
+        const action=await prepareSend();
+        sendLifecycle='COMMIT_ATTEMPTED';if(action.kind==='button')await step(()=>action.handle.click({noWaitAfter:true,timeout:10000}));else await step(()=>action.handle.press('Enter'));
         const outgoingUserMessageId=await poll(async()=>{const id=latest(await step(()=>metadata(target)),'user');return id&&id!==c.operation.previousUserMessageId?id:undefined},10000,'CHATGPT_MESSAGE_ID_UNAVAILABLE');
         sendLifecycle='COMMITTED';
         const conversationUrl=await poll(async()=>step(async()=>stableUrl(target.url())),10000,'CHATGPT_CONVERSATION_IDENTITY_REQUIRED');
@@ -116,7 +118,7 @@ export function buildCliOperation(
       let stable;
       const text=await poll(async()=>{const handles=await step(()=>target.$$(c.selectors.message));let current;for(const handle of handles)if(await step(()=>handle.getAttribute('data-message-id'))===assistantId){current=handle;break}if(!current)return;const streaming=await step(()=>current.getAttribute('data-message-streaming'))==='true'||Boolean(await step(()=>current.$(c.selectors.streaming)));const stopped=Boolean(await step(()=>target.$(c.selectors.stop)));const value=(await step(()=>current.innerText())).trim();if(streaming||stopped||!value){stable=undefined;return}if(stable===value)return value;stable=value},Math.max(1,deadline-Date.now()));
       return result({value:text})
-    }catch(error){const code=error&&typeof error.message==='string'?error.message:'';if(sendLifecycle==='COMMITTED')return bridgeError('SEND_CHECKPOINT_PERSIST_FAILED');if(sendLifecycle==='COMMIT_ATTEMPTED'&&code!=='ORIGIN_DENIED')return bridgeError('SEND_OBSERVER_FAILED');if(['ORIGIN_DENIED','BRIDGE_TIMEOUT','CHATGPT_DOCUMENT_MISSING','CHATGPT_MESSAGE_ID_UNAVAILABLE','CHATGPT_TAB_AMBIGUOUS','CHATGPT_CONVERSATION_NOT_FOUND','CHATGPT_CONVERSATION_UNAVAILABLE'].includes(code))return bridgeError(code);throw error}
+    }catch(error){const code=error&&typeof error.message==='string'?error.message:'';if(sendLifecycle==='COMMITTED')return bridgeError('SEND_CHECKPOINT_PERSIST_FAILED');if(sendLifecycle==='COMMIT_ATTEMPTED'&&code!=='ORIGIN_DENIED')return bridgeError('SEND_OBSERVER_FAILED');if(['ORIGIN_DENIED','BRIDGE_TIMEOUT','CHATGPT_DOCUMENT_MISSING','CHATGPT_MESSAGE_ID_UNAVAILABLE','CHATGPT_SEND_NOT_READY','CHATGPT_TAB_AMBIGUOUS','CHATGPT_CONVERSATION_NOT_FOUND','CHATGPT_CONVERSATION_UNAVAILABLE'].includes(code))return bridgeError(code);throw error}
     finally{if(target&&navigationGuard)target.off('framenavigated',navigationGuard)}
   }`;
 }

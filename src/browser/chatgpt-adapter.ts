@@ -17,6 +17,8 @@ import { OriginPolicy } from './origin-policy.js';
 import { ConversationUrlPolicy } from './conversation-url.js';
 
 const MESSAGE_ID = /^[A-Za-z0-9_-]+$/;
+type PreparedSendAction =
+  { kind: 'button'; handle: ElementHandle } | { kind: 'keyboard'; handle: ElementHandle };
 
 export interface ChatGPTWebAdapter {
   connect(options?: BrowserConnectOptions): Promise<BrowserConversationSelection>;
@@ -120,10 +122,10 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
         'Composer did not become visible',
       );
       await guard.run(() => composer.fill(message));
-      const send = await guard.run(() => page.$(CHATGPT_SEND_SELECTOR));
-      if (send && (await guard.run(() => send.isVisible())))
-        await guard.run(() => send.click({ noWaitAfter: true }));
-      else await guard.run(() => composer.press('Enter'));
+      const action = await this.prepareSendAction(guard, composer);
+      if (action.kind === 'button')
+        await guard.run(() => action.handle.click({ noWaitAfter: true, timeout: 10_000 }));
+      else await guard.run(() => action.handle.press('Enter'));
       let outgoingUserMessageId: string;
       try {
         outgoingUserMessageId = await this.pollValue(
@@ -271,6 +273,41 @@ export class PlaywrightChatGPTWebAdapter implements ChatGPTWebAdapter {
         'Invalid ChatGPT message identity',
         'CHATGPT_MESSAGE_ID_UNAVAILABLE',
       );
+  }
+  private async prepareSendAction(
+    guard: OperationGuard,
+    composer: ElementHandle,
+  ): Promise<PreparedSendAction> {
+    const deadline = Date.now() + Math.min(10_000, this.defaultTimeout);
+    let observedButton = false;
+    while (Date.now() < deadline) {
+      guard.assertValid();
+      const send = await guard.run(() => this.requiredPage().$(CHATGPT_SEND_SELECTOR));
+      if (send) {
+        observedButton = true;
+        if (await guard.run(() => send.isVisible())) {
+          try {
+            await guard.run(() =>
+              send.click({
+                trial: true,
+                timeout: Math.max(1, Math.min(250, deadline - Date.now())),
+              }),
+            );
+            return { kind: 'button', handle: send };
+          } catch (error) {
+            guard.assertValid();
+            if (error instanceof ChatbridgeError) throw error;
+          }
+        }
+      }
+      await guard.delay(50);
+    }
+    if (observedButton)
+      throw new ChatbridgeError(
+        'Composer was filled, but no deterministic send action became actionable before timeout; no send action was attempted',
+        'CHATGPT_SEND_NOT_READY',
+      );
+    return { kind: 'keyboard', handle: composer };
   }
   private async pollValue<T>(
     guard: OperationGuard,

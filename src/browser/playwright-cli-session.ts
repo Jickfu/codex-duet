@@ -190,6 +190,8 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
       ORIGIN_DENIED: 'Page navigated outside the allowlisted origin',
       CHATGPT_DOCUMENT_MISSING: 'ChatGPT document root is unavailable',
       CHATGPT_MESSAGE_ID_UNAVAILABLE: 'ChatGPT did not expose a stable message identity',
+      CHATGPT_SEND_NOT_READY:
+        'Composer was filled, but no deterministic send action became actionable before timeout; no send action was attempted',
       CHATGPT_TAB_AMBIGUOUS: 'Multiple ChatGPT tabs are available and no current tab is defined',
       CHATGPT_CONVERSATION_NOT_FOUND: 'The checkpoint conversation tab is not available',
       CHATGPT_CONVERSATION_UNAVAILABLE: 'The bound ChatGPT conversation is unavailable',

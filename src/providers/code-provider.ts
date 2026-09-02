@@ -1,4 +1,7 @@
 import type { TestStatus } from '../core/domain.js';
+import type { LocalContextRef, LocalReviewTargetV1 } from '../local/domain.js';
+
+export type { LocalContextRef } from '../local/domain.js';
 
 export type GitHubContextRef = {
   mode: 'GITHUB';
@@ -9,11 +12,6 @@ export type GitHubContextRef = {
   baseRef: string;
 };
 
-export type LocalContextRef = {
-  mode: 'LOCAL';
-  taskId: string;
-};
-
 export type ContextRef = GitHubContextRef | LocalContextRef;
 
 export type GitHubReviewTarget = GitHubContextRef & {
@@ -21,7 +19,7 @@ export type GitHubReviewTarget = GitHubContextRef & {
   testStatus: TestStatus;
 };
 
-export type LocalReviewTarget = LocalContextRef;
+export type LocalReviewTarget = LocalReviewTargetV1;
 
 export type ReviewTarget = GitHubReviewTarget | LocalReviewTarget;
 

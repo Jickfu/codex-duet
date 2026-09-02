@@ -6,6 +6,11 @@ import type {
   GitHubReviewTarget,
   LocalContextRef,
 } from '../../src/providers/code-provider.js';
+import {
+  LocalContextRefSchema,
+  LocalReviewTargetV1Schema,
+  LocalWorkspaceSnapshotV1Schema,
+} from '../../src/local/domain.js';
 import { GitHubCodeProvider } from '../../src/github/github-code-provider.js';
 
 describe('provider boundary', () => {
@@ -23,7 +28,56 @@ describe('provider boundary', () => {
     >().toEqualTypeOf<GitHubReviewTarget>();
     expectTypeOf<Parameters<typeof githubReviewEnvelope>[0]>().toEqualTypeOf<GitHubReviewTarget>();
     expectTypeOf<LocalContextRef>().not.toMatchTypeOf<Parameters<typeof githubReviewEnvelope>[0]>();
-    const local: LocalContextRef = { mode: 'LOCAL', taskId: 'local' };
+    const digest = 'a'.repeat(64);
+    const local: LocalContextRef = {
+      mode: 'LOCAL',
+      taskId: 'local',
+      workspaceId: digest,
+      baselineSnapshotId: digest,
+    };
     expect(local.mode).toBe('LOCAL');
+    expect(LocalContextRefSchema.parse(local)).toEqual(local);
+  });
+
+  it('separates immutable workspace state from formal LOCAL review authority', () => {
+    const digest = 'a'.repeat(64);
+    const snapshot = LocalWorkspaceSnapshotV1Schema.parse({
+      version: 1,
+      kind: 'LOCAL_WORKSPACE_SNAPSHOT',
+      workspaceId: digest,
+      git: {
+        head: 'b'.repeat(40),
+        branch: 'main',
+        detached: false,
+        indexManifestSha256: digest,
+        statusSha256: digest,
+      },
+      surface: {
+        policyVersion: 1,
+        manifestSha256: digest,
+        fileCount: 10,
+        totalBytes: 1000,
+      },
+      artifacts: { gitStatusSha256: digest, gitDiffSha256: digest },
+      snapshotId: digest,
+    });
+    expect(snapshot.snapshotId).toBe(digest);
+
+    const target = LocalReviewTargetV1Schema.parse({
+      version: 1,
+      mode: 'LOCAL',
+      taskId: 'local',
+      iteration: 1,
+      workspaceId: digest,
+      baselineSnapshotId: digest,
+      reviewSnapshotId: digest,
+      testEvidenceSha256: digest,
+      executionSummarySha256: digest,
+      testStatus: 'PASS',
+      changeAttribution: 'UNATTRIBUTED_NET_DELTA',
+      reviewTargetSha256: digest,
+    });
+    expect(target).not.toHaveProperty('reviewRef');
+    expect(target.changeAttribution).toBe('UNATTRIBUTED_NET_DELTA');
   });
 });

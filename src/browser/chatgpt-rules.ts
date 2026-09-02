@@ -108,7 +108,7 @@ export function buildCliOperation(
         await step(()=>composer.fill(c.operation.message));
         const prepareSend=async()=>{const deadline=Date.now()+10000;let observed=false;while(Date.now()<deadline){const candidates=await step(()=>target.$$(c.selectors.send));if(candidates.length>0)observed=true;for(const candidate of candidates){if(await step(()=>candidate.isVisible())){try{await step(()=>candidate.click({trial:true,timeout:Math.max(1,Math.min(250,deadline-Date.now()))}));return {kind:'button',handle:candidate}}catch(error){guard()}}}await delay(50)}if(observed)fail('CHATGPT_SEND_NOT_READY');return {kind:'keyboard',handle:composer}};
         const action=await prepareSend();
-        sendLifecycle='COMMIT_ATTEMPTED';if(action.kind==='button')await step(()=>action.handle.click({noWaitAfter:true,timeout:10000}));else await step(()=>action.handle.press('Enter'));
+        sendLifecycle='COMMIT_ATTEMPTED';if(action.kind==='button')await step(()=>action.handle.click({noWaitAfter:true,timeout:10000}));else await step(()=>action.handle.press('Enter',{timeout:10000}));
         const outgoingUserMessageId=await poll(async()=>{const id=latest(await step(()=>metadata(target)),'user');return id&&id!==c.operation.previousUserMessageId?id:undefined},10000,'CHATGPT_MESSAGE_ID_UNAVAILABLE');
         sendLifecycle='COMMITTED';
         const conversationUrl=await poll(async()=>step(async()=>stableUrl(target.url())),10000,'CHATGPT_CONVERSATION_IDENTITY_REQUIRED');

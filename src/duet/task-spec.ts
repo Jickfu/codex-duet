@@ -94,6 +94,18 @@ export function taskSpecFingerprint(value: TaskSpecWithoutIntegrity): string {
   return sha256(canonicalJson(value));
 }
 
+export function validateTaskSpecIntegrity(spec: TaskSpecV1): TaskSpecV1 {
+  const content = Object.fromEntries(
+    Object.entries(spec).filter(([key]) => key !== 'integrity'),
+  ) as TaskSpecWithoutIntegrity;
+  if (spec.integrity.sha256 !== taskSpecFingerprint(content))
+    throw new ChatbridgeError(
+      'TaskSpec integrity fingerprint is invalid',
+      'TASK_SPEC_INTEGRITY_INVALID',
+    );
+  return spec;
+}
+
 export function validateTaskSpecCandidate(
   candidate: unknown,
   expected: {
@@ -139,15 +151,7 @@ export function validateTaskSpecCandidate(
         'TASK_SPEC_CONTEXT_MISMATCH',
       );
   }
-  const content = Object.fromEntries(
-    Object.entries(spec).filter(([key]) => key !== 'integrity'),
-  ) as TaskSpecWithoutIntegrity;
-  if (spec.integrity.sha256 !== taskSpecFingerprint(content))
-    throw new ChatbridgeError(
-      'TaskSpec integrity fingerprint is invalid',
-      'TASK_SPEC_INTEGRITY_INVALID',
-    );
-  return spec;
+  return validateTaskSpecIntegrity(spec);
 }
 
 export function serializeTaskSpec(value: TaskSpecV1): string {

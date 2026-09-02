@@ -153,6 +153,83 @@ describe('DuetOrchestrator', () => {
     expect(await readFile(store.requestArtifactPath('demo'), 'utf8')).toBe(
       'Add a harmless document.',
     );
+    const planner = await readFile(outputFile, 'utf8');
+    expect(planner).toContain('docs/contracts/planner-v1.md');
+    expect(planner).toContain('must-1: Add the requested document');
+    expect(planner).not.toContain('Your response must echo TASK');
+    expect(
+      await readFile(store.iterationArtifactPath('demo', 1, 'planner-control.txt'), 'utf8'),
+    ).toBe(planner);
+    expect(
+      JSON.parse(
+        await readFile(store.iterationArtifactPath('demo', 1, 'planner-control.json'), 'utf8'),
+      ),
+    ).toMatchObject({ version: 1, sha256: sha256(planner), bytes: Buffer.byteLength(planner) });
+
+    await respond('PLAN');
+    await compactDuet.ingest('demo', responseFile);
+    await compactDuet.beginExecution('demo');
+    await compactDuet.prepareReview('demo', 'PASS', outputFile);
+    const reviewer = await readFile(outputFile, 'utf8');
+    expect(reviewer).toContain('docs/contracts/reviewer-v1.md');
+    expect(reviewer).toContain(`${context.baseRef}..${target.reviewRef}`);
+    expect(reviewer).not.toContain('Add a harmless document.');
+    expect(
+      await readFile(store.iterationArtifactPath('demo', 1, 'reviewer-control.txt'), 'utf8'),
+    ).toBe(reviewer);
+    expect(
+      JSON.parse(
+        await readFile(store.iterationArtifactPath('demo', 1, 'reviewer-control.json'), 'utf8'),
+      ),
+    ).toMatchObject({ version: 1, sha256: sha256(reviewer), bytes: Buffer.byteLength(reviewer) });
+  });
+
+  it('rejects an oversized compact envelope before producing Browser or pending-send input', async () => {
+    const content: TaskSpecWithoutIntegrity = {
+      version: 1,
+      taskId: 'demo',
+      mode: 'GITHUB',
+      objective: 'x'.repeat(9000),
+      scope: { allowed: [], forbidden: [] },
+      acceptanceCriteria: [],
+      exactLiterals: [],
+      protocolRequirements: [],
+      context: {
+        repository: context.repository,
+        taskBranch: context.taskBranch,
+        baseRef: context.baseRef,
+      },
+      source: { rawRequestSha256: sha256('Add a harmless document.') },
+      contracts: {
+        plannerPath: 'docs/contracts/planner-v1.md',
+        reviewerPath: 'docs/contracts/reviewer-v1.md',
+        resolution: 'AT_BASE_REF',
+      },
+    };
+    await writeFile(
+      taskSpecFile,
+      JSON.stringify({ ...content, integrity: { sha256: taskSpecFingerprint(content) } }),
+      'utf8',
+    );
+    const taskSpecs = new TaskSpecStore(path.join(temporary, '.chatbridge'));
+    const compactDuet = new DuetOrchestrator(
+      provider as never,
+      store,
+      historyVerifier,
+      undefined,
+      taskSpecs,
+    );
+    await expect(
+      compactDuet.init('demo', requestFile, outputFile, 8, taskSpecFile),
+    ).rejects.toMatchObject({ code: 'C2C_PAYLOAD_TOO_LARGE' });
+    await expect(readFile(outputFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(taskSpecs.pathFor('demo'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(
+      readFile(path.join(temporary, '.chatbridge', 'runs', 'demo', 'browser.json'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await store.read('demo')).toBeUndefined();
   });
 
   it('initializes PLANNING once and writes a compact envelope', async () => {

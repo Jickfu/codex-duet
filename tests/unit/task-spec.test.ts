@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -144,5 +144,11 @@ describe('TaskSpecV1', () => {
     await expect(store.create(spec)).rejects.toMatchObject({ code: 'TASK_SPEC_IMMUTABLE' });
     expect((await readdir(path.dirname(store.pathFor('demo')))).sort()).toEqual(['task-spec.json']);
     expect(store.pathFor('demo')).toContain(path.join('.chatbridge', 'runs', 'demo'));
+    await writeFile(
+      store.pathFor('demo'),
+      serializeTaskSpec({ ...spec, objective: 'tampered but schema-valid' }),
+      'utf8',
+    );
+    await expect(store.read('demo')).rejects.toMatchObject({ code: 'TASK_SPEC_INTEGRITY_INVALID' });
   });
 });

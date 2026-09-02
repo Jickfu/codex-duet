@@ -10,6 +10,14 @@ import {
   type DuetRunCheckpointV2,
 } from './run.js';
 
+type IterationArtifactName =
+  | 'plan.md'
+  | 'review-envelope.txt'
+  | 'planner-control.txt'
+  | 'planner-control.json'
+  | 'reviewer-control.txt'
+  | 'reviewer-control.json';
+
 export class DuetRunStore {
   constructor(private readonly stateRoot: string) {}
 
@@ -41,7 +49,7 @@ export class DuetRunStore {
   async writeIterationArtifact(
     taskIdInput: string,
     iteration: number,
-    name: 'plan.md' | 'review-envelope.txt',
+    name: IterationArtifactName,
     content: string,
   ): Promise<void> {
     if (!Number.isInteger(iteration) || iteration < 1)
@@ -57,7 +65,7 @@ export class DuetRunStore {
   iterationArtifactPath(
     taskIdInput: string,
     iteration: number,
-    name: 'plan.md' | 'review-envelope.txt',
+    name: IterationArtifactName,
   ): string {
     if (!Number.isInteger(iteration) || iteration < 1)
       throw new ChatbridgeError('Invalid iteration artifact path', 'INVALID_ITERATION');

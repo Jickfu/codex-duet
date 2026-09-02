@@ -2,7 +2,12 @@ import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ChatbridgeError } from '../core/errors.js';
 import { TaskIdSchema } from '../core/domain.js';
-import { serializeTaskSpec, TaskSpecV1Schema, type TaskSpecV1 } from './task-spec.js';
+import {
+  serializeTaskSpec,
+  TaskSpecV1Schema,
+  validateTaskSpecIntegrity,
+  type TaskSpecV1,
+} from './task-spec.js';
 
 export class TaskSpecStore {
   constructor(private readonly stateRoot: string) {}
@@ -10,7 +15,9 @@ export class TaskSpecStore {
   async read(taskIdInput: string): Promise<TaskSpecV1 | undefined> {
     const file = this.pathFor(taskIdInput);
     try {
-      return TaskSpecV1Schema.parse(JSON.parse(await readFile(file, 'utf8')));
+      return validateTaskSpecIntegrity(
+        TaskSpecV1Schema.parse(JSON.parse(await readFile(file, 'utf8'))),
+      );
     } catch (error: any) {
       if (error?.code === 'ENOENT') return undefined;
       throw error;

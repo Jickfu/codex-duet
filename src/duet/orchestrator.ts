@@ -23,6 +23,11 @@ import { assertGitHubResponseIdentity } from './response-identity.js';
 import { ExecutionStore } from './execution-store.js';
 import { TaskSpecStore } from './task-spec-store.js';
 import { validateTaskSpecCandidate } from './task-spec.js';
+import {
+  assertCompactC2CPayload,
+  plannerControlEnvelope,
+  reviewerControlEnvelope,
+} from './control-projection.js';
 import type {
   ExecutionWorkspaceInspector,
   ExecutionWorkspaceState,
@@ -148,10 +153,14 @@ export class DuetOrchestrator {
       createdAt: now,
       updatedAt: now,
     };
+    const plannerEnvelope = taskSpec
+      ? plannerControlEnvelope(context, taskSpec, run.iteration)
+      : planningEnvelope(run, request);
     await this.store.writeRequestArtifact(taskId, request);
     if (taskSpec) await this.taskSpecs!.create(taskSpec);
+    if (taskSpec) await this.persistControl(run.taskId, run.iteration, 'planner', plannerEnvelope);
     await this.store.write(run);
-    await writeFile(outputFile, planningEnvelope(run, request), 'utf8');
+    await writeFile(outputFile, plannerEnvelope, 'utf8');
     return run;
   }
 
@@ -652,9 +661,17 @@ export class DuetOrchestrator {
         'Previous REVIEW_REF is not an ancestor of current REVIEW_REF',
         'REVIEW_HISTORY_DIVERGED',
       );
-    const envelope = previousReviewRef
-      ? iterativeReviewEnvelope(reviewTarget, run.iteration, previousReviewRef)
-      : githubReviewEnvelope(reviewTarget, run.iteration);
+    const taskSpec = await this.taskSpecs?.read(run.taskId);
+    const envelope = taskSpec
+      ? reviewerControlEnvelope(
+          reviewTarget,
+          taskSpec.contracts.reviewerPath,
+          run.iteration,
+          previousReviewRef,
+        )
+      : previousReviewRef
+        ? iterativeReviewEnvelope(reviewTarget, run.iteration, previousReviewRef)
+        : githubReviewEnvelope(reviewTarget, run.iteration);
     const current = run.iterations[run.iteration - 1]!;
     const updated: DuetRunCheckpointV2 = {
       ...run,
@@ -668,8 +685,25 @@ export class DuetOrchestrator {
       'review-envelope.txt',
       envelope,
     );
+    if (taskSpec) await this.persistControl(run.taskId, run.iteration, 'reviewer', envelope);
     await this.store.write(updated);
     return { updated, envelope };
+  }
+
+  private async persistControl(
+    taskId: string,
+    iteration: number,
+    role: 'planner' | 'reviewer',
+    envelope: string,
+  ): Promise<void> {
+    const bytes = assertCompactC2CPayload(envelope);
+    await this.store.writeIterationArtifact(taskId, iteration, `${role}-control.txt`, envelope);
+    await this.store.writeIterationArtifact(
+      taskId,
+      iteration,
+      `${role}-control.json`,
+      `${JSON.stringify({ version: 1, sha256: sha256(envelope), bytes }, null, 2)}\n`,
+    );
   }
 
   private now(): string {

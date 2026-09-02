@@ -167,15 +167,33 @@ describe('Playwright CLI transport', () => {
     browserRunning = false;
   });
   it('does not accumulate transport resources across repeated operations', async () => {
-    const run = vi.fn(async (args: readonly string[]) => ({
-      stdout: encoded(args, { value: true }),
-      stderr: '',
-    }));
+    const run = vi.fn(async (args: readonly string[], _timeout?: number) => {
+      void _timeout;
+      return {
+        stdout: encoded(args, { value: true }),
+        stderr: '',
+      };
+    });
     const session = new PlaywrightCliChatGPTSession({ run }, 'long', 'https://chatgpt.com/', [
       'https://chatgpt.com',
     ]);
     for (let i = 0; i < 20; i++) await session.isLoggedIn();
     expect(run).toHaveBeenCalledTimes(20);
+  });
+  it('validates a named session with a bounded non-DOM health operation', async () => {
+    const run = vi.fn(async (args: readonly string[], timeout?: number) => {
+      void timeout;
+      return {
+        stdout: encoded(args, { value: true }),
+        stderr: '',
+      };
+    });
+    const session = new PlaywrightCliChatGPTSession({ run }, 'health', 'https://chatgpt.com/', [
+      'https://chatgpt.com',
+    ]);
+    await session.validateSession();
+    expect(String(run.mock.calls[0]?.[0][2])).toContain('"kind":"health"');
+    expect(run.mock.calls[0]?.[1]).toBe(5_000);
   });
   it('recovers a committed send after a CLI process timeout without resending', async () => {
     const marker = {

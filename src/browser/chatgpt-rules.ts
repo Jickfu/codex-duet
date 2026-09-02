@@ -11,6 +11,7 @@ export const CHATGPT_MESSAGE_SELECTOR = '[data-message-author-role]';
 export const CHATGPT_USER_SELECTOR = '[data-message-author-role="user"][data-message-id]';
 
 export type CliOperation =
+  | { kind: 'health' }
   | { kind: 'ensure' | 'login' | 'prepare'; conversationUrl?: string }
   | {
       kind: 'commit';
@@ -82,6 +83,7 @@ export function buildCliOperation(
     const guard=()=>{if(!target||invalid||!allowed(target.url())){invalid=true;fail('ORIGIN_DENIED')}};
     const step=async action=>{guard();try{const value=await action();guard();return value}catch(error){guard();throw error}};
     try{
+      if(c.operation.kind==='health')return result({value:true});
       if(c.operation.kind==='ensure'||c.operation.kind==='login'||c.operation.kind==='prepare'){
         let choice=selected(c.operation.conversationUrl);if(!choice){choice=await page.context().newPage();try{await choice.goto(c.operation.conversationUrl||c.url)}catch(error){if(c.operation.conversationUrl)fail('CHATGPT_CONVERSATION_UNAVAILABLE');throw error}}bind(choice);guard();
         if(c.operation.conversationUrl&&canonical(choice.url())!==c.operation.conversationUrl)fail('CHATGPT_CONVERSATION_UNAVAILABLE');

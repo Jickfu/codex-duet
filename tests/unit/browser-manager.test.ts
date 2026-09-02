@@ -48,9 +48,186 @@ function harness(success: (args: readonly string[]) => boolean) {
       now += ms;
     }),
   };
-  return { runner, detection, store, timing };
+  const seed = (runtime: RuntimeSelection, sessionActive = true) => {
+    value = runtime;
+    attached = sessionActive;
+  };
+  return { runner, detection, store, timing, seed };
 }
 describe('native existing-session selection', () => {
+  it('reuses a compatible active channel CDP named session without attach or detach', async () => {
+    const h = harness(() => false);
+    h.seed({
+      mode: 'existing-channel-cdp',
+      browser: 'chrome',
+      transport: 'cli',
+      session: 'stable-session',
+      attachedAt: '2026-09-01T00:00:00.000Z',
+    });
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'chrome', transport: 'cdp' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result).toMatchObject({
+      mode: 'existing-channel-cdp',
+      browser: 'chrome',
+      transport: 'cli',
+      session: 'stable-session',
+    });
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('attach'))).toHaveLength(0);
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('detach'))).toHaveLength(0);
+    expect(h.timing.delay).not.toHaveBeenCalled();
+    expect(h.detection.open).not.toHaveBeenCalled();
+  });
+  it('reuses a compatible channel CDP session for an explicit CDP auto-browser request', async () => {
+    const h = harness(() => false);
+    h.seed({
+      mode: 'existing-channel-cdp',
+      browser: 'msedge',
+      transport: 'cli',
+      session: 'edge-session',
+      attachedAt: '2026-09-01T00:00:00.000Z',
+    });
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'auto', transport: 'cdp' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result).toMatchObject({ browser: 'msedge', session: 'edge-session' });
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('attach'))).toHaveLength(0);
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('detach'))).toHaveLength(0);
+  });
+  it('reuses the same named session on a repeated explicit public attach', async () => {
+    const h = harness((args) => args.includes('--cdp=chrome'));
+    const options = { browser: 'chrome', transport: 'cdp' } as const;
+    const first = await attachBrowser(
+      loadConfig(),
+      options,
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    const attachCountAfterFirst = h.runner.run.mock.calls.filter(([args]) =>
+      args.includes('attach'),
+    ).length;
+    const second = await attachBrowser(
+      loadConfig(),
+      options,
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(second.session).toBe(first.session);
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('attach'))).toHaveLength(
+      attachCountAfterFirst,
+    );
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('detach'))).toHaveLength(0);
+  });
+  it('detaches and reattaches only when validation proves the named session is stale', async () => {
+    const h = harness(() => false);
+    h.seed({
+      mode: 'existing-channel-cdp',
+      browser: 'chrome',
+      transport: 'cli',
+      session: 'stale-session',
+      attachedAt: '2026-09-01T00:00:00.000Z',
+    });
+    let validation = true;
+    h.runner.run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes('run-code') && validation) {
+        validation = false;
+        throw new ChatbridgeError('lost', 'PLAYWRIGHT_CLI_SESSION_LOST');
+      }
+      if (args.includes('detach')) return { stdout: 'detached', stderr: '' };
+      if (args.includes('--cdp=chrome')) return { stdout: 'attached', stderr: '' };
+      if (args.includes('run-code')) {
+        const nonce = String(args[2]).match(/"nonce":"([^"]+)"/)?.[1];
+        const payload = Buffer.from(
+          encodeURIComponent(JSON.stringify({ ok: true })),
+          'ascii',
+        ).toString('hex');
+        return { stdout: `CHATBRIDGE_RESULT_${nonce}_${payload}`, stderr: '' };
+      }
+      throw new Error('unexpected');
+    });
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'chrome', transport: 'cdp' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result.mode).toBe('existing-channel-cdp');
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('detach'))).toHaveLength(1);
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('attach'))).toHaveLength(1);
+  });
+  it.each([
+    'PLAYWRIGHT_CLI_TIMEOUT',
+    'PLAYWRIGHT_CLI_FAILED',
+    'CLI_RESULT_MISSING',
+    'CLI_RESULT_INVALID',
+    'ORIGIN_DENIED',
+    'CHATGPT_TAB_AMBIGUOUS',
+  ])('fails closed on non-conclusive named-session validation error %s', async (code) => {
+    const h = harness(() => false);
+    h.seed({
+      mode: 'existing-channel-cdp',
+      browser: 'chrome',
+      transport: 'cli',
+      session: 'uncertain-session',
+      attachedAt: '2026-09-01T00:00:00.000Z',
+    });
+    h.runner.run = vi.fn(async (args: readonly string[]) => {
+      if (args.includes('run-code')) throw new ChatbridgeError('validation failed', code);
+      throw new Error('unexpected lifecycle action');
+    });
+    await expect(
+      attachBrowser(
+        loadConfig(),
+        { browser: 'chrome', transport: 'cdp' },
+        h.runner,
+        h.detection,
+        h.store,
+        h.timing,
+      ),
+    ).rejects.toMatchObject({ code });
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('detach'))).toHaveLength(0);
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('attach'))).toHaveLength(0);
+    expect(h.store.write).not.toHaveBeenCalled();
+  });
+  it('does not reuse a previous Chrome session for an explicit Edge request', async () => {
+    const h = harness((args) => args.includes('--cdp=msedge'));
+    h.seed({
+      mode: 'existing-channel-cdp',
+      browser: 'chrome',
+      transport: 'cli',
+      session: 'chrome-session',
+      attachedAt: '2026-09-01T00:00:00.000Z',
+    });
+    const result = await attachBrowser(
+      loadConfig(),
+      { browser: 'msedge', transport: 'cdp' },
+      h.runner,
+      h.detection,
+      h.store,
+      h.timing,
+    );
+    expect(result).toMatchObject({ mode: 'existing-channel-cdp', browser: 'msedge' });
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('detach'))).toHaveLength(1);
+    expect(h.runner.run.mock.calls.filter(([args]) => args.includes('--cdp=msedge'))).toHaveLength(
+      1,
+    );
+  });
   it('prefers Chrome extension before every other runtime', async () => {
     const h = harness((args) => args.includes('--extension=chrome'));
     const result = await attachBrowser(

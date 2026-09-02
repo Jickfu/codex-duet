@@ -73,8 +73,6 @@ export async function attachBrowser(
     return runtime;
   };
   const previous = await store.read();
-  if (previous?.transport === 'cli')
-    await runner.run([`--session=${previous.session!}`, 'detach'], 5000).catch(() => undefined);
   if (
     options.browser === 'bundled' &&
     (options.transport === 'extension' || options.transport === 'cdp' || options.endpoint)
@@ -83,6 +81,23 @@ export async function attachBrowser(
       'Bundled browser cannot be selected as an existing-browser transport',
       'INVALID_BROWSER_TRANSPORT',
     );
+  if (isReusableCliRuntime(previous, options)) {
+    try {
+      await new PlaywrightCliChatGPTSession(
+        runner,
+        previous.session,
+        config.chatgptUrl,
+        config.allowedOrigins,
+        config.timeoutMs,
+      ).validateSession();
+      return save({ ...previous, attachedAt: new Date().toISOString() });
+    } catch (error) {
+      if (!(error instanceof ChatbridgeError) || error.code !== 'PLAYWRIGHT_CLI_SESSION_LOST')
+        throw error;
+    }
+  }
+  if (previous?.transport === 'cli')
+    await runner.run([`--session=${previous.session!}`, 'detach'], 5000).catch(() => undefined);
   if (!options.endpoint && (options.transport === 'auto' || options.transport === 'extension')) {
     for (const browser of channels(options.browser)) {
       if ((await tryCliAttach(runner, session, `--extension=${browser}`, config)).ok)
@@ -188,6 +203,26 @@ export async function attachBrowser(
     attachedAt: new Date().toISOString(),
   });
 }
+
+function isReusableCliRuntime(
+  previous: RuntimeSelection | undefined,
+  options: AttachOptions,
+): previous is RuntimeSelection & {
+  mode: 'existing-channel-cdp';
+  browser: 'chrome' | 'msedge';
+  transport: 'cli';
+  session: string;
+} {
+  return Boolean(
+    previous?.transport === 'cli' &&
+    previous.session &&
+    previous.mode === 'existing-channel-cdp' &&
+    !options.endpoint &&
+    options.transport === 'cdp' &&
+    (options.browser === previous.browser || options.browser === 'auto'),
+  );
+}
+
 async function tryCliAttach(
   runner: PlaywrightCliRunnerLike,
   session: string,

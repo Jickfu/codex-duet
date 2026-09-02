@@ -63,6 +63,9 @@ export class PlaywrightCliChatGPTSession implements BrowserAutomationSession {
     const selection = result.value as { conversationUrl?: string } | undefined;
     if (selection?.conversationUrl) this.selectedConversationUrl = selection.conversationUrl;
   }
+  async validateSession() {
+    await this.operation({ kind: 'health' }, 5_000, 'session-validation');
+  }
   async isLoggedIn() {
     return Boolean(
       (

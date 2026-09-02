@@ -378,11 +378,11 @@ M3.1 is **Frozen** at implementation baseline `02a3fdb6c35a3766527543bb703b8ac67
 
 M3 overall remains **IN PROGRESS**. M3.2 is split into independently bounded stages:
 
-| Sub-stage | Scope                               | Status                                                        |
-| --------- | ----------------------------------- | ------------------------------------------------------------- |
-| M3.2a     | Task ↔ ChatGPT conversation binding | **FROZEN / DESKTOP E2E PASS**                                 |
-| M3.2b     | `EXECUTING` crash reconciliation    | **IMPLEMENTATION COMPLETE / REAL DESKTOP CRASH E2E REQUIRED** |
-| M3.2c     | Resume and Browser UX hardening     | **PLANNED**                                                   |
+| Sub-stage | Scope                                 | Status                                   |
+| --------- | ------------------------------------- | ---------------------------------------- |
+| M3.2a     | Task ↔ ChatGPT conversation binding   | **FROZEN / DESKTOP E2E PASS**            |
+| M3.2b     | `EXECUTING` crash reconciliation      | **FROZEN / REAL DESKTOP CRASH E2E PASS** |
+| M3.2c     | Compact Browser Control and Resume UX | **PHASE 1 IN PROGRESS**                  |
 
 M3.2a is frozen before M3.2b begins. It changes only deterministic Browser Control Plane routing. Frozen M0 C2C, legacy M1 behavior, M2 Git/ref safety, M3.0, M3.1, review identity, and automatic multi-round execution remain unchanged.
 
@@ -512,7 +512,9 @@ Design status: **Frozen**
 
 Implementation status: **Complete**
 
-Real Desktop crash E2E: **MANUAL REQUIRED**
+Real Desktop crash E2E: **PASS**
+
+Crash A preserved dirty bytes and resumed `WORKTREE_IN_PROGRESS`. Crash B adopted `CURRENT_ITERATION_M2_PREPARED` into `EXECUTED` without a second prepare or push. Immutable acceptance artifact `3a29c6ddf7bea6723dcc08131793025d484b9eeb` contains exactly the required acceptance file. The later Reviewer Browser transport failure is outside M3.2b acceptance.
 
 M3.2b replaces blind `EXECUTION_RECOVERY_REQUIRED` handling with deterministic local reconciliation. It does not add a `RECOVERING` C2C state, change `TaskState`, upgrade Frozen `DuetRunCheckpointV2`, alter ADR-012 review identity, duplicate Frozen M2, modify M3.2a conversation binding, or change the Codex sole-Executor rule.
 
@@ -535,7 +537,7 @@ chatbridge duet reconcile-execution --task <taskId>
 chatbridge duet record-tests --task <taskId> --status PASS|FAIL|NOT_RUN
 ```
 
-The implementation adds strict `ExecutionCheckpointV1` storage, atomic iteration-scoped persistence, exact durable plan verification, a read-only conflict-aware Git inspector, cross-process task-operation locking, crash-safe begin ordering, HEAD-bound test recording, prepare-review evidence enforcement, compact reconciliation output, and Frozen M2 adoption through read-only `status()` with no repush. The automated quality gate passes 224 of 224 tests, including torn begin reuse, legacy missing-sidecar handling, baseline/dirty/committed/stale classifications, normal prepare enforcement, first- and later-iteration M2 evidence handling, no-repush adoption, divergence, inspector safety, and concurrent record/reconcile/prepare serialization. This evidence does not replace the required real Desktop crash dogfood.
+The implementation adds strict `ExecutionCheckpointV1` storage, atomic iteration-scoped persistence, exact durable plan verification, a read-only conflict-aware Git inspector, cross-process task-operation locking, crash-safe begin ordering, HEAD-bound test recording, prepare-review evidence enforcement, compact reconciliation output, and Frozen M2 adoption through read-only `status()` with no repush. The automated quality gate passed 224 of 224 tests before the independent real Desktop Crash A/B acceptance.
 
 A read-only Git inspector classifies branch, full `HEAD`, ancestry, worktree/conflict metadata, sidecar evidence, and Frozen M2 status. It never checks out, resets, cleans, stashes, commits, or pushes. One task's begin, record-tests, reconcile, and prepare-review operations require cross-process-safe serialization.
 
@@ -554,7 +556,7 @@ M2 adoption is valid only when repository and branch identity, full review SHA, 
 
 Wrong or detached branch, conflicts, non-descendant history, baseline/plan/iteration mismatch, or inconsistent M2 identity fails closed. Dirty work is preserved. PASS is never inferred. M3.2b proves Git-visible state, explicit test evidence, and Frozen M2 evidence only; database, deployment, remote API, publishing, cloud, and arbitrary shell side effects remain `UNVERIFIED` and outside exactly-once guarantees.
 
-Future implementation acceptance must cover: clean-baseline crash, partial dirty worktree, committed work without tests, exact-HEAD PASS ready for review, Frozen M2 completed before M3 persistence with no repush, and divergent history fail-closed. Real Desktop dogfood must interrupt once after an uncommitted edit and once after Frozen M2 completion but before M3 persistence; a narrow test/dev-only hook may expose the second window without entering the product path.
+The completed acceptance covered a real termination after an uncommitted edit and another after Frozen M2 completion but before M3 persistence. M3.2c changes do not require repeating Crash A/B.
 
 The authoritative decision is [ADR-014](../adr/ADR-014-executing-crash-reconciliation.md). M3.2c and M4 remain out of scope.
 
@@ -570,12 +572,12 @@ The external Skill validator could not run because the current Python environmen
 
 ## M3 roadmap
 
-| Sub-stage | Scope                                    | Status                                                        |
-| --------- | ---------------------------------------- | ------------------------------------------------------------- |
-| M3.0      | Codex Skill + Single-Round Orchestration | **FROZEN**                                                    |
-| M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS**                                 |
-| M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS**                                 |
-| M3.2b     | `EXECUTING` Crash Reconciliation         | **IMPLEMENTATION COMPLETE / REAL DESKTOP CRASH E2E REQUIRED** |
-| M3.2c     | Resume / Browser UX Hardening            | **PLANNED**                                                   |
+| Sub-stage | Scope                                    | Status                                   |
+| --------- | ---------------------------------------- | ---------------------------------------- |
+| M3.0      | Codex Skill + Single-Round Orchestration | **FROZEN**                               |
+| M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS**            |
+| M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS**            |
+| M3.2b     | `EXECUTING` Crash Reconciliation         | **FROZEN / REAL DESKTOP CRASH E2E PASS** |
+| M3.2c     | Compact Browser Control and Resume UX    | **PHASE 1 IN PROGRESS**                  |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

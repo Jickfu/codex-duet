@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted design. Implementation is complete with 224 automated tests passing; real Desktop crash acceptance remains manual and required before freeze.
+Frozen / Real Desktop Crash A/B E2E PASS. Crash A preserved dirty work and resumed `WORKTREE_IN_PROGRESS`; Crash B adopted `CURRENT_ITERATION_M2_PREPARED` without a second prepare or push. Immutable acceptance artifact: `3a29c6ddf7bea6723dcc08131793025d484b9eeb`. The later Reviewer Browser transport failure is outside M3.2b crash-reconciliation acceptance.
 
 ## Context
 

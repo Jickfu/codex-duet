@@ -4,6 +4,8 @@ Status: **PLANNED M4/M5**
 
 LOCAL mode is for private, unpushed, or uncommitted workspaces. It preserves Codex as the sole Executor while allowing ChatGPT Web to read the current workspace through a bounded, read-only MCP Data Plane. Nothing in this document claims that Local MCP, `submit_response`, or cloudflared is implemented.
 
+Future LOCAL MCP will expose repository context and the same repository-resident Planner/Reviewer contracts read-only. Local TaskSpec remains separate orchestration authority; M3.2c Phase 1 does not expose it through MCP or implement LOCAL task execution.
+
 ## Target architecture
 
 ```mermaid

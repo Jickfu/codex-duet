@@ -4,6 +4,12 @@
 
 Locator priority is stable IDs/data attributes, semantic roles/ARIA, then structural fallback. Sending commits only after observing the new outgoing user identity. Waiting anchors the response to that user, observes streaming markers and stop controls, and returns only non-empty stable final text. An ambiguous or unfinished response fails explicitly.
 
+## Compact C2C product boundary
+
+M3.2c new-task Planner and Reviewer projections use unchanged C2C/1 and are limited to 8192 UTF-8 bytes over the complete serialized Browser-bound envelope. The M3 orchestration boundary measures bytes before Browser connection or task pending-send mutation and returns `C2C_PAYLOAD_TOO_LARGE` with non-sensitive `limitBytes` and `actualBytes` metadata. It never truncates, splits, or removes required semantics. Frozen legacy unscoped `send --message-file` behavior is unchanged; arbitrary-size composer transport is not a product requirement.
+
+The local TaskSpec is authoritative and the bound conversation is only a semantic cache. Conversation unavailability remains fail closed; Phase 1 adds no rebind or attachment fallback.
+
 ## Reliable turn checkpoint
 
 M1.2.3 replaces the non-monotonic assistant DOM count with `SendCheckpointV2`. A successful send records only the exact conversation URL, the newly observed outgoing user `data-message-id`, the previous assistant message ID when available, and a timestamp. It never stores prompt or response text. A V1 `assistantCount` checkpoint is stale and requires a new send; it is never interpreted as a fallback.

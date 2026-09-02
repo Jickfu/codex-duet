@@ -4,7 +4,7 @@ Status: **IMPLEMENTED / FROZEN M2**
 
 Frozen implementation baseline: `f4b1dd012f79b8a6522f56d40d46f7af39a14923`
 
-GITHUB mode uses the shared Browser Control Plane for compact C2C messages and GitHub as the code Data Plane. It does not use Local MCP, a workspace MCP server, cloudflared, or a local tunnel.
+GITHUB mode uses the shared Browser Control Plane for compact C2C messages and GitHub as the code Data Plane. New tasks send a compact projection of the local authoritative TaskSpec once; ChatGPT resolves concise Planner and Reviewer contracts plus repository context at immutable `BASE_REF`. ChatGPT cannot read the local TaskSpec directly. GITHUB mode does not use Local MCP, a workspace MCP server, cloudflared, or a local tunnel.
 
 ## Architecture
 
@@ -73,6 +73,6 @@ The Frozen M2 implementation supplies task/ref safety, verified push, persistenc
 
 ## M3.2b crash-reconciliation boundary
 
-M3.2b is implemented with real Desktop crash E2E still required. It inspects local branch, full `HEAD`, ancestry, worktree/conflict metadata, iteration execution evidence, and existing Frozen M2 status. It does not duplicate or replay M2 push, remote-SHA verification, review-ref creation, or branch-safety logic.
+M3.2b is frozen with real Desktop Crash A/B E2E PASS. It inspects local branch, full `HEAD`, ancestry, worktree/conflict metadata, iteration execution evidence, and existing Frozen M2 status. It does not duplicate or replay M2 push, remote-SHA verification, review-ref creation, or branch-safety logic.
 
 If Frozen M2 conclusively finished the current iteration before M3 persisted `EXECUTED`, reconciliation may adopt the durable `GitHubReviewTarget` and reconstruct the deterministic review envelope without repushing. Adoption requires matching repository and task branch, clean conflict-free worktree, `HEAD == M2.reviewRef`, execution-base ancestry, test status, and multi-round review monotonicity. A stale prior-iteration review ref or a local `HEAD` advanced beyond M2 evidence is not adoptable and fails closed. See [ADR-014](adr/ADR-014-executing-crash-reconciliation.md).

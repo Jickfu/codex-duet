@@ -169,6 +169,8 @@ Rejected. These signals are fuzzy or transport-dependent and can route task cont
 
 ## Consequences
 
+Under ADR-015, conversation continuity is not TaskSpec authority. The local durable TaskSpec remains authoritative and the bound conversation is only a semantic cache; an unavailable conversation continues to fail closed with no implicit rebind.
+
 - Durable tasks can resume and coexist without overwriting each other's Browser checkpoints.
 - Exact durable identity takes precedence over ambiguous global tab discovery only for task-aware operations.
 - Legacy M1 behavior and fail-closed ambiguity remain compatible.

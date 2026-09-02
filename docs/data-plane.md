@@ -4,6 +4,8 @@ Status: GITHUB **IMPLEMENTED / FROZEN M2**; LOCAL **PLANNED M4/M5**
 
 The Browser Bridge is the shared Control Plane. It transports compact C2C lifecycle messages between Codex Desktop and ChatGPT Web. Code context travels through a separate, mode-specific Data Plane.
 
+For new M3.2c tasks, Codex Desktop normalizes the private raw request into a local durable `TaskSpecV1`. Browser carries only a bounded role-specific projection. Repository policy, architecture, source, and diffs are read through GitHub or future LOCAL MCP. TaskSpec is not a replacement repository Data Plane.
+
 ```mermaid
 flowchart LR
     C[Codex Desktop] -->|Control Plane: compact C2C| B[Browser Bridge]

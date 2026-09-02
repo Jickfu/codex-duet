@@ -1,6 +1,6 @@
 # ADR-016: Immutable task interaction policy and bounded Discussion
 
-Status: Accepted for M3.3
+Status: Frozen / Real Desktop dual-provider E2E PASS
 
 ## Decision
 

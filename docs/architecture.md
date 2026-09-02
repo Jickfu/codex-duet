@@ -81,7 +81,7 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 | Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**                    |
 | `EXECUTING` crash reconciliation                   | **M3.2b FROZEN / REAL DESKTOP CRASH E2E PASS** |
 | Compact C2C and durable TaskSpec                   | **M3.2c FROZEN / REAL DESKTOP E2E PASS**       |
-| Immutable interaction policy and Discussion        | **M3.3 IMPLEMENTED / ACCEPTANCE PENDING**      |
+| Immutable interaction policy and Discussion        | **M3.3 FROZEN / REAL DESKTOP E2E PASS**        |
 | `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                                 |
 | `submit_response` MCP return path                  | **PLANNED M4**                                 |
 | LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**                             |

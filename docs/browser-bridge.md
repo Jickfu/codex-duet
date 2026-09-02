@@ -20,7 +20,7 @@ The CLI-supplied current ChatGPT page wins for send. If it is not a ChatGPT page
 
 ## M3.2a task-scoped conversation targeting
 
-M3.2a is **Frozen / Desktop E2E PASS** at implementation baseline `7d9d31206e699d5a878f40abe23fb1aa1d82412e`. [ADR-013](adr/ADR-013-task-conversation-binding.md) adds deterministic task-aware routing without changing unscoped M1 behavior.
+M3.2a is **Frozen / Real Desktop E2E PASS** at implementation baseline `61f8565dda0ffc6b24c90116b648368afad1da6b`. The earlier `7d9d31206e699d5a878f40abe23fb1aa1d82412e` remains the historical pre-dogfood baseline. [ADR-013](adr/ADR-013-task-conversation-binding.md) adds deterministic task-aware routing without changing unscoped M1 behavior.
 
 Before M3.2a, `runtime()` called `connect()` before `wait` read workspace-global `.chatbridge/session.json`. Both Library and CLI transports could therefore perform ambiguous global tab discovery before the existing durable `conversationUrl` was used, and the global file was overwritten by every send. M3.2a replaces neither M1 nor its browser engine; it adds a task-scoped path:
 
@@ -46,7 +46,7 @@ When discovery already selects a concrete conversation, the first-send reservati
 
 Unbound bootstrap is protected by a bounded project-wide filesystem lock covering selection, applicable reservation preflight, send confirmation, final concrete reservation, and atomic sidecar persistence. Active conflicts on an already concrete target are rejected before `sendMessage`; a newly created concrete identity is checked inside the same lock before persistence. Historical concrete conversations require explicit bootstrap. A generic URL is rejected as an explicit exact target. Confirmed Browser side effects whose stable identity or task checkpoint cannot be persisted return `SEND_CHECKPOINT_PERSIST_FAILED` and never authorize resend.
 
-A real post-freeze dogfood exposed first-send blank-chat URL stabilization. Durable binding now waits for a concrete conversation identity after confirmed send. The identity segment is bounded and limited to `[A-Za-z0-9_-]+`; credentials, encoded path ambiguity, traversal, wrong origins, `/`, and other generic routes fail closed. This additive integration fix does not add rebind, change exact-bound wait behavior, or alter M3.2b crash reconciliation.
+Real post-freeze dogfood exposed and verified three additive integration corrections: first-send blank-chat identity stabilization, the send-actionability boundary before `COMMIT_ATTEMPTED`, and strict M3 GITHUB response-identity echoes. Durable binding now treats generic `/` only as bootstrap, waits for a concrete identity after confirmed send, and never authorizes resend after a confirmed-side-effect checkpoint failure. The identity segment is bounded and limited to `[A-Za-z0-9_-]+`; credentials, encoded path ambiguity, traversal, wrong origins, `/`, and other generic routes fail closed. Generic M0 C2C, exact-bound wait behavior, and M3.2b crash reconciliation remain unchanged.
 
 The task sidecar is strict, atomic, path-safe, project-scoped, and gitignored. It contains no prompts, responses, DOM, screenshots, cookies, credentials, or browser storage. The existing `OriginPolicy` remains the sole URL authority. Two active tasks cannot bind the same conversation; terminal tasks release exclusivity but retain historical evidence.
 

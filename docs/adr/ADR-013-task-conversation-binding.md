@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted and frozen. M3.2a implementation baseline `7d9d31206e699d5a878f40abe23fb1aa1d82412e` passed real Desktop multiple-tab E2E acceptance. The Decision is unchanged.
+Accepted and re-frozen. M3.2a implementation baseline `61f8565dda0ffc6b24c90116b648368afad1da6b` passed real Desktop blank-new-chat E2E acceptance. The earlier `7d9d31206e699d5a878f40abe23fb1aa1d82412e` remains the historical pre-dogfood baseline. The Decision is unchanged.
 
 ## Context
 

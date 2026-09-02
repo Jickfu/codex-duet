@@ -53,7 +53,9 @@ The real M3.1 automatic multi-round acceptance completed with task `m3-multi-rou
 
 The first review deliberately returned `PLAN` iteration 2. After canonical `wait --parse` → validated Envelope JSON → `duet ingest`, the current Codex Desktop Executor automatically continued without another user prompt. The second review inspected delta `590ae12a8c9f21b8cea19480b7946c6d14fdf4c5..d99559b03eacff5e6447c95fa77fc12287e29134`, then approved formal range `02a3fdb6c35a3766527543bb703b8ac67feeb194..d99559b03eacff5e6447c95fa77fc12287e29134` as `DONE` iteration 2. Both iterations passed 168 of 168 tests. Iteration-scoped plan and review artifacts remained in durable history, and Frozen M2 performed both safe pushes. The dogfood branch remains unmerged as immutable acceptance evidence.
 
-The real M3.2a multiple-tab acceptance completed with task `m3-conversation-binding-dogfood-20260902`, immutable range `7d9d31206e699d5a878f40abe23fb1aa1d82412e..ee0434f86bd8a70bb0aa6703b9ab8457e8793051`, 199 of 199 tests passing, and final durable state `DONE` iteration 1. Explicit C1 bootstrap, bound Planner wait, and exact missing-tab reopen for review send and Reviewer wait all passed while unrelated C2/C3 remained open. The task binding and original `boundAt` stayed stable, pending-send replacement remained task-scoped, and the legacy global SessionStore stayed isolated. The dogfood branch remains unmerged; public documentation deliberately omits all real conversation and message identifiers.
+The historical M3.2a multiple-tab acceptance completed with task `m3-conversation-binding-dogfood-20260902`, immutable range `7d9d31206e699d5a878f40abe23fb1aa1d82412e..ee0434f86bd8a70bb0aa6703b9ab8457e8793051`, 199 of 199 tests passing, and final durable state `DONE` iteration 1. Its branch remains unmerged as historical acceptance evidence.
+
+After post-freeze dogfood exposed blank-new-chat stabilization, send-actionability, and M3 GITHUB response-identity integration defects, M3.2a was re-frozen at implementation baseline `61f8565dda0ffc6b24c90116b648368afad1da6b`. Real Desktop task `m3-blank-chat-binding-dogfood-3-20260902` completed immutable range `61f8565dda0ffc6b24c90116b648368afad1da6b..03524ac61d120ee0426d9924b937fda109e77d21`, with 281 of 281 tests passing and final durable state `DONE`. Its first implicit send stabilized generic new chat to one concrete durable identity; Planner wait, review send, and Reviewer wait used that same identity. Binding and `boundAt` stayed unchanged, pending-send replacement was task-scoped, legacy SessionStore stayed isolated, and no rebind or resend occurred. The acceptance branch remains unmerged; public documentation deliberately omits all real conversation and message identifiers.
 
 ## Roadmap
 
@@ -61,7 +63,7 @@ The real M3.2a multiple-tab acceptance completed with task `m3-conversation-bind
 - M3 overall: **IN PROGRESS**.
 - M3.1 Automatic Multi-Round Review/Fix Loop: **Frozen / Desktop E2E PASS**.
 - M3.2a Task ↔ ChatGPT Conversation Binding: **Frozen / Desktop E2E PASS**.
-- M3.2b `EXECUTING` Crash Reconciliation: **IMPLEMENTATION COMPLETE / DESKTOP E2E MANUAL REQUIRED**.
+- M3.2b `EXECUTING` Crash Reconciliation: **IMPLEMENTATION COMPLETE / REAL DESKTOP CRASH E2E REQUIRED**.
 - M3.2c Resume / Browser UX Hardening: **PLANNED**.
 
 M3.1 builds on the frozen single-round contract. One task keeps one branch and one immutable task-level `BASE_REF`; every formal review is cumulative `BASE_REF..CURRENT_REVIEW_REF`, while `PREVIOUS_REVIEW_REF..CURRENT_REVIEW_REF` is only a delta focus. A valid Reviewer `PLAN` for iteration `N+1` continues automatically under the current Codex Desktop Executor, subject to deterministic guards and a configurable iteration limit. M3.1 does not add a Node agent loop or change M4/M5/M6 ownership. See [the M3 milestone](milestones/M3-durable-orchestrator.md) and [ADR-012](adr/ADR-012-multi-round-review-identity.md).

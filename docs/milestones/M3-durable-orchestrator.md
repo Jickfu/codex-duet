@@ -378,11 +378,11 @@ M3.1 is **Frozen** at implementation baseline `02a3fdb6c35a3766527543bb703b8ac67
 
 M3 overall remains **IN PROGRESS**. M3.2 is split into independently bounded stages:
 
-| Sub-stage | Scope                               | Status                        |
-| --------- | ----------------------------------- | ----------------------------- |
-| M3.2a     | Task ↔ ChatGPT conversation binding | **FROZEN / DESKTOP E2E PASS** |
-| M3.2b     | `EXECUTING` crash reconciliation    | **COMPLETE / E2E MANUAL**     |
-| M3.2c     | Resume and Browser UX hardening     | **PLANNED**                   |
+| Sub-stage | Scope                               | Status                                                        |
+| --------- | ----------------------------------- | ------------------------------------------------------------- |
+| M3.2a     | Task ↔ ChatGPT conversation binding | **FROZEN / DESKTOP E2E PASS**                                 |
+| M3.2b     | `EXECUTING` crash reconciliation    | **IMPLEMENTATION COMPLETE / REAL DESKTOP CRASH E2E REQUIRED** |
+| M3.2c     | Resume and Browser UX hardening     | **PLANNED**                                                   |
 
 M3.2a is frozen before M3.2b begins. It changes only deterministic Browser Control Plane routing. Frozen M0 C2C, legacy M1 behavior, M2 Git/ref safety, M3.0, M3.1, review identity, and automatic multi-round execution remain unchanged.
 
@@ -396,7 +396,9 @@ Desktop multiple-tab E2E: **PASS**
 
 Overall status: **Frozen**
 
-Frozen implementation baseline: `7d9d31206e699d5a878f40abe23fb1aa1d82412e`
+Frozen implementation baseline: `61f8565dda0ffc6b24c90116b648368afad1da6b`
+
+Historical pre-dogfood baseline: `7d9d31206e699d5a878f40abe23fb1aa1d82412e`. It remains part of the milestone history; real post-freeze Desktop integration testing required the additive corrections recorded below before M3.2a was re-frozen.
 
 Before M3.2a, `.chatbridge/session.json` was the only Browser checkpoint and was workspace-global. Although `SendCheckpointV2` recorded `conversationUrl` and `outgoingUserMessageId`, `runtime()` connected the browser before `wait` read that checkpoint. Both transports could therefore reject multiple ChatGPT tabs before the durable target was available, and another task's send could overwrite the only wait anchor.
 
@@ -425,7 +427,7 @@ The Library, Extension/CDP, Playwright CLI, and managed-browser paths share one 
 
 The implementation adds strict `TaskBrowserBindingV1` storage, canonical URL validation, a bounded cross-process bootstrap lock, active/historical reservation checks, pre-send selected identity, exact missing-tab reopen, task-aware CLI composition, and stable Playwright CLI targeting across independent operations. It distinguishes `SEND_OUTCOME_UNKNOWN` from confirmed-side-effect `SEND_CHECKPOINT_PERSIST_FAILED`; neither permits automatic resend. Successful waits retain the pending marker until a later confirmed send atomically replaces it.
 
-The implementation quality gate passes 199 of 199 automated tests, including concurrent bootstrap, active and historical reservation behavior, task-scoped isolation, wait-before-connect ordering, timeout and unknown-send recovery, persistence failure, exact Library/CDP routing, missing-tab reopen, Playwright CLI target stability, strict task recovery isolation, post-reservation exact re-pin ordering, and Frozen legacy regressions.
+The re-frozen implementation quality gate passes 281 of 281 automated tests, including concurrent bootstrap, active and historical reservation behavior, task-scoped isolation, wait-before-connect ordering, timeout and unknown-send recovery, persistence failure, exact Library/CDP routing, missing-tab reopen, Playwright CLI target stability, strict task recovery isolation, post-reservation exact re-pin ordering, send-actionability boundaries, GITHUB response identity, and Frozen legacy regressions.
 
 #### Real Desktop multiple-tab E2E acceptance
 
@@ -474,11 +476,31 @@ Conversation identity stability, original `boundAt`, unrelated-tab isolation, ta
 29. No M3.1 automatic-loop changes.
 30. No Browser DOM, history, or storage is persisted in task binding.
 
-#### Post-freeze first-send stabilization fix
+#### Post-freeze integration corrections and re-freeze
 
-A real post-freeze dogfood exposed first-send blank-chat URL stabilization: the outgoing message ID was observable before the SPA changed `/` into `/c/<id>`, so the generic route could be persisted and an exact task-aware wait could not reopen the real conversation. The implementation fix is complete with regression coverage; it does not yet declare a replacement Frozen baseline.
+Real Desktop dogfood after the historical freeze exposed three integration defects. They were corrected without changing the M3.2a ownership boundary:
 
-Library and Playwright CLI send confirmation now wait for a concrete stable identity after the outgoing ID. A bounded `[A-Za-z0-9_-]+` segment in a `.../c/<conversation-id>` path is required; wrong origins, credentials, encoded path ambiguity, traversal, and generic routes fail closed. Existing bound identity remains immutable, explicit `/` bootstrap is rejected, final blank-chat reservation occurs inside the existing project lock, and a confirmed send without a stable identity returns `SEND_CHECKPOINT_PERSIST_FAILED` with no automatic resend. Strict process-timeout recovery remains exact-only and may conservatively return `SEND_OUTCOME_UNKNOWN`. The pre-fix failed Desktop dogfood evidence is preserved and is not rebound, replayed, or edited. M3.2b semantics and M3.2c scope are unchanged.
+1. **First-send blank-chat identity stabilization.** The outgoing message ID could become observable before the SPA changed generic `/` into `/c/<id>`, allowing `/` to be persisted too early. Generic `/` is now a bootstrap surface only. Library and Playwright CLI confirmation wait for a validated concrete durable identity after the outgoing ID; a confirmed send whose identity or checkpoint cannot be established returns `SEND_CHECKPOINT_PERSIST_FAILED` and never authorizes resend.
+2. **Send actionability boundary.** The old path could enter `COMMIT_ATTEMPTED` before the actual send action was executable. The frozen order is now `fill → bounded readiness → trial actionability → COMMIT_ATTEMPTED → actual send → COMMITTED`. `CHATGPT_SEND_NOT_READY` is a deterministic `PRE_COMMIT` failure.
+3. **M3 GITHUB response identity.** Generic M0 C2C remains unchanged. M3 GITHUB Planner and Reviewer responses must echo and match durable `MODE`, `REPOSITORY`, `TASK_BRANCH`, and `BASE_REF`; Reviewer responses additionally echo `REVIEW_REF` and `TEST_STATUS`. A multi-round `PLAN N+1` identifies the just-completed review N ref/status.
+
+The replacement frozen implementation baseline is `61f8565dda0ffc6b24c90116b648368afad1da6b`. The earlier `7d9d31206e699d5a878f40abe23fb1aa1d82412e` remains the historical pre-correction baseline.
+
+#### Real Desktop blank-new-chat acceptance
+
+Task `m3-blank-chat-binding-dogfood-3-20260902` completed on `agent/task-m3-blank-chat-binding-dogfood-3-20260902` with lifecycle:
+
+```text
+PLANNING → PLAN → EXECUTING → EXECUTED → REVIEWING → DONE
+```
+
+Its immutable GitHub range was `61f8565dda0ffc6b24c90116b648368afad1da6b..03524ac61d120ee0426d9924b937fda109e77d21`; tests were `PASS — 281/281`, and Reviewer returned `DONE` iteration 1. Frozen M2 safely published the immutable review ref. The range adds only `docs/acceptance/M3-blank-chat-binding-dogfood.md` and contains no implementation change.
+
+The Browser lifecycle passed `GENERIC_NEW_CHAT → first implicit send → concrete durable conversation identity → Planner wait on the same identity → Review send on the same identity → Reviewer wait on the same identity`. Generic `/` was never persisted; binding identity and `boundAt` remained unchanged; the pending marker was replaced correctly; legacy SessionStore remained unchanged; and there was no rebind, resend, ambiguity, or conversation-unavailable result.
+
+The review ref `03524ac61d120ee0426d9924b937fda109e77d21` is immutable acceptance evidence, not an implementation baseline. Its task branch remains unmerged and must not be deleted, consistent with earlier M2/M3 acceptance-branch policy. Public documentation omits the actual ChatGPT conversation URL, conversation ID, message IDs, timestamps, and local profile data. Failed pre-PASS dogfood evidence remains available locally in gitignored `.chatbridge` state without publishing private metadata.
+
+Library and Playwright CLI use a bounded `[A-Za-z0-9_-]+` segment in `.../c/<conversation-id>`; wrong origins, credentials, encoded path ambiguity, traversal, and generic routes fail closed. Existing bound identity remains immutable, explicit `/` bootstrap is rejected, and final blank-chat reservation occurs inside the existing project lock. Strict process-timeout recovery remains exact-only and may conservatively return `SEND_OUTCOME_UNKNOWN`. M3.2b semantics and M3.2c scope are unchanged.
 
 The complete decision, alternatives, lifecycle, multiple-task example, privacy boundary, and implementation constraints are frozen in [ADR-013](../adr/ADR-013-task-conversation-binding.md).
 
@@ -493,6 +515,8 @@ Implementation status: **Complete**
 Real Desktop crash E2E: **MANUAL REQUIRED**
 
 M3.2b replaces blind `EXECUTION_RECOVERY_REQUIRED` handling with deterministic local reconciliation. It does not add a `RECOVERING` C2C state, change `TaskState`, upgrade Frozen `DuetRunCheckpointV2`, alter ADR-012 review identity, duplicate Frozen M2, modify M3.2a conversation binding, or change the Codex sole-Executor rule.
+
+Its implementation milestone commit remains `c487a133e36552ee6448c4d89fd8c9081899ce7f`. After the M3.2a re-freeze, any fresh M3.2b Desktop crash acceptance must use the then-current main HEAD as `BASE_REF`, not the older milestone commit. Failed historical task `m3-execution-recovery-dogfood-20260902` remains preserved and must not be resumed; the next acceptance uses a fresh task.
 
 Each iteration records an immutable execution baseline and optional exact-HEAD test evidence in:
 
@@ -546,12 +570,12 @@ The external Skill validator could not run because the current Python environmen
 
 ## M3 roadmap
 
-| Sub-stage | Scope                                    | Status                        |
-| --------- | ---------------------------------------- | ----------------------------- |
-| M3.0      | Codex Skill + Single-Round Orchestration | **FROZEN**                    |
-| M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS** |
-| M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS** |
-| M3.2b     | `EXECUTING` Crash Reconciliation         | **COMPLETE / E2E MANUAL**     |
-| M3.2c     | Resume / Browser UX Hardening            | **PLANNED**                   |
+| Sub-stage | Scope                                    | Status                                                        |
+| --------- | ---------------------------------------- | ------------------------------------------------------------- |
+| M3.0      | Codex Skill + Single-Round Orchestration | **FROZEN**                                                    |
+| M3.1      | Automatic Multi-Round Review/Fix Loop    | **FROZEN / DESKTOP E2E PASS**                                 |
+| M3.2a     | Task ↔ ChatGPT Conversation Binding      | **FROZEN / DESKTOP E2E PASS**                                 |
+| M3.2b     | `EXECUTING` Crash Reconciliation         | **IMPLEMENTATION COMPLETE / REAL DESKTOP CRASH E2E REQUIRED** |
+| M3.2c     | Resume / Browser UX Hardening            | **PLANNED**                                                   |
 
 M3 overall remains **IN PROGRESS**. M4, M5, and M6 ownership is unchanged.

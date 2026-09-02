@@ -71,20 +71,20 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 
 ## Current and planned status
 
-| Component                                          | Status                          |
-| -------------------------------------------------- | ------------------------------- |
-| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0**     |
-| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1**     |
-| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2**     |
-| Codex Skill and single-round durable orchestration | **FROZEN M3.0**                 |
-| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**      |
-| Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**     |
-| `EXECUTING` crash reconciliation                   | **M3.2b COMPLETE / E2E MANUAL** |
-| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                  |
-| `submit_response` MCP return path                  | **PLANNED M4**                  |
-| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**              |
-| cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**                  |
-| Hardening, packaging, and distribution             | **PLANNED M6**                  |
+| Component                                          | Status                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0**                                         |
+| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1**                                         |
+| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2**                                         |
+| Codex Skill and single-round durable orchestration | **FROZEN M3.0**                                                     |
+| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**                                          |
+| Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**                                         |
+| `EXECUTING` crash reconciliation                   | **M3.2b IMPLEMENTATION COMPLETE / REAL DESKTOP CRASH E2E REQUIRED** |
+| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                                                      |
+| `submit_response` MCP return path                  | **PLANNED M4**                                                      |
+| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**                                                  |
+| cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**                                                      |
+| Hardening, packaging, and distribution             | **PLANNED M6**                                                      |
 
 M3 can first complete the loop in GITHUB mode. A complete LOCAL loop depends on M4 and M5.
 
@@ -129,6 +129,6 @@ Browser-internal waiting, selector fallback, streaming detection, and text extra
 
 M3.2a separates task Browser routing into `.chatbridge/runs/<taskId>/browser.json` rather than changing Frozen M3.1 V2 checkpoints. Task-aware send/wait use an exact conversation target and independent pending-send marker; legacy unscoped operations retain workspace-global `.chatbridge/session.json`. See [ADR-013](adr/ADR-013-task-conversation-binding.md).
 
-The M3.2a frozen implementation baseline is `7d9d31206e699d5a878f40abe23fb1aa1d82412e`. Real Desktop acceptance verified explicit multiple-tab bootstrap, bound Planner wait, exact missing-tab reopen for review send and Reviewer wait, immutable binding and `boundAt`, task-scoped pending-send replacement, and legacy SessionStore isolation. Public evidence uses symbolic conversation identities; real conversation URLs and message IDs remain only in local gitignored Browser Control Plane state.
+The M3.2a re-frozen implementation baseline is `61f8565dda0ffc6b24c90116b648368afad1da6b`; `7d9d31206e699d5a878f40abe23fb1aa1d82412e` remains the historical pre-dogfood baseline. Real Desktop acceptance verified blank-new-chat stabilization from generic bootstrap to concrete durable identity, bound Planner and Reviewer waits, immutable binding and `boundAt`, task-scoped pending-send replacement, legacy SessionStore isolation, send-actionability preflight, and strict GITHUB lifecycle response identity. Public evidence uses symbolic conversation identities; real conversation URLs and message IDs remain only in local gitignored Browser Control Plane state.
 
 M3.2b adds no protocol state and does not upgrade Frozen `DuetRunCheckpointV2`. Its design stores iteration-scoped execution baseline and exact-HEAD test evidence in `.chatbridge/runs/<taskId>/iterations/<N>/execution.json`. A read-only inspector classifies the current Git/worktree state; dirty work and valid commits are preserved, never reset or blindly replayed. Conclusive Frozen M2 current-iteration evidence may be adopted into M3 `EXECUTED` without another push. Arbitrary external shell or network side effects remain unverified and outside any exactly-once guarantee. See [ADR-014](adr/ADR-014-executing-crash-reconciliation.md).

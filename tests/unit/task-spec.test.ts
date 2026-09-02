@@ -138,10 +138,17 @@ describe('TaskSpecV1', () => {
     roots.push(root);
     const store = new TaskSpecStore(path.join(root, '.chatbridge'));
     const spec = candidate();
-    await store.create(spec);
+    await store.createOrVerify(spec);
     expect(await store.read('demo')).toEqual(spec);
     expect(await readFile(store.pathFor('demo'), 'utf8')).toBe(serializeTaskSpec(spec));
-    await expect(store.create(spec)).rejects.toMatchObject({ code: 'TASK_SPEC_IMMUTABLE' });
+    const originalBytes = await readFile(store.pathFor('demo'), 'utf8');
+    await expect(store.createOrVerify(spec)).resolves.toBeUndefined();
+    expect(await readFile(store.pathFor('demo'), 'utf8')).toBe(originalBytes);
+    const different = candidate({ objective: 'Different immutable semantics' });
+    await expect(store.createOrVerify(different)).rejects.toMatchObject({
+      code: 'TASK_SPEC_IMMUTABLE',
+    });
+    expect(await readFile(store.pathFor('demo'), 'utf8')).toBe(originalBytes);
     expect((await readdir(path.dirname(store.pathFor('demo')))).sort()).toEqual(['task-spec.json']);
     expect(store.pathFor('demo')).toContain(path.join('.chatbridge', 'runs', 'demo'));
     await writeFile(

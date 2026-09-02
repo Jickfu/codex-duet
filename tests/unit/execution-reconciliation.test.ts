@@ -13,6 +13,14 @@ import type {
 } from '../../src/duet/execution-workspace-inspector.js';
 import type { TaskOperationLockLike } from '../../src/duet/task-operation-lock.js';
 import type { GitHubContextRef, GitHubReviewTarget } from '../../src/providers/code-provider.js';
+import { TaskSpecStore } from '../../src/duet/task-spec-store.js';
+import { TaskContextStore } from '../../src/duet/task-context-store.js';
+import {
+  sha256,
+  taskSpecFingerprint,
+  type TaskSpecV1,
+  type TaskSpecWithoutIntegrity,
+} from '../../src/duet/task-spec.js';
 
 const roots: string[] = [];
 const base = 'a'.repeat(40);
@@ -44,7 +52,7 @@ class SerialLock implements TaskOperationLockLike {
   }
 }
 
-async function fixture() {
+async function fixture(compact = false) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'execution-reconcile-'));
   roots.push(root);
   const stateRoot = path.join(root, '.chatbridge');
@@ -53,6 +61,7 @@ async function fixture() {
   const request = path.join(root, 'request.md');
   const response = path.join(root, 'response.txt');
   const output = path.join(root, 'output.txt');
+  const taskSpecFile = path.join(root, 'task-spec.json');
   await writeFile(request, 'Add a document.', 'utf8');
   let workspace: ExecutionWorkspaceState = {
     branch: context.taskBranch,
@@ -92,13 +101,43 @@ async function fixture() {
     status: vi.fn(async () => m2),
   };
   const lock = new SerialLock();
+  const taskSpecs = new TaskSpecStore(stateRoot);
+  const taskContexts = new TaskContextStore(stateRoot);
+  let taskSpec: TaskSpecV1 | undefined;
+  if (compact) {
+    const content: TaskSpecWithoutIntegrity = {
+      version: 1,
+      taskId: 'demo',
+      mode: 'GITHUB',
+      objective: 'Add a document.',
+      scope: { allowed: ['docs'], forbidden: [] },
+      acceptanceCriteria: [],
+      exactLiterals: [],
+      protocolRequirements: [],
+      context: {
+        repository: context.repository,
+        taskBranch: context.taskBranch,
+        baseRef: context.baseRef,
+      },
+      source: { rawRequestSha256: sha256('Add a document.') },
+      contracts: {
+        plannerPath: 'docs/contracts/planner-v1.md',
+        reviewerPath: 'docs/contracts/reviewer-v1.md',
+        resolution: 'AT_BASE_REF',
+      },
+    };
+    taskSpec = { ...content, integrity: { sha256: taskSpecFingerprint(content) } };
+    await writeFile(taskSpecFile, JSON.stringify(taskSpec), 'utf8');
+  }
   const duet = new DuetOrchestrator(
     provider as never,
     runStore,
     { isAncestor: vi.fn(async () => true) },
     { store: executionStore, inspector, lock, now: () => new Date(1).toISOString() },
+    taskSpecs,
+    taskContexts,
   );
-  await duet.init('demo', request, output);
+  await duet.init('demo', request, output, 8, compact ? taskSpecFile : undefined);
   await writeFile(
     response,
     serializeEnvelope({
@@ -130,6 +169,9 @@ async function fixture() {
       lock,
       now: () => new Date(1).toISOString(),
     },
+    taskSpecs,
+    taskContexts,
+    taskSpec,
     setWorkspace: (value: Partial<ExecutionWorkspaceState>) =>
       (workspace = { ...workspace, ...value }),
     setM2: (value: GitHubTaskCheckpoint) => (m2 = value),
@@ -263,6 +305,28 @@ describe('EXECUTING reconciliation', () => {
     expect(
       await readFile(x.runStore.iterationArtifactPath('demo', 1, 'review-envelope.txt'), 'utf8'),
     ).toContain(`REVIEW_REF: ${commit}`);
+  });
+
+  it('fails Compact Crash-B adoption on missing TaskSpec, then adopts after exact restoration without repush', async () => {
+    const x = await fixture(true);
+    await x.duet.beginExecution('demo');
+    x.setWorkspace({ head: commit });
+    await x.duet.recordTests('demo', 'PASS');
+    x.setM2(x.executedM2());
+    await rm(x.taskSpecs.pathFor('demo'));
+    await expect(x.duet.reconcileExecution('demo')).rejects.toMatchObject({
+      code: 'TASK_SPEC_MISSING',
+    });
+    expect(x.provider.getReviewTarget).not.toHaveBeenCalled();
+    expect(await x.runStore.read('demo')).toMatchObject({ state: 'EXECUTING' });
+    await x.taskSpecs.createOrVerify(x.taskSpec!);
+    expect(await x.duet.reconcileExecution('demo')).toMatchObject({
+      classification: 'CURRENT_ITERATION_M2_PREPARED',
+      action: 'RESUME_EXECUTED',
+      adopted: true,
+    });
+    expect(x.provider.getReviewTarget).not.toHaveBeenCalled();
+    expect(await x.runStore.read('demo')).toMatchObject({ state: 'EXECUTED' });
   });
 
   it.each([

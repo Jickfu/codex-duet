@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,11 +9,14 @@ import { DuetRunStore } from '../../src/duet/run-store.js';
 import type { DuetRunCheckpointV1 } from '../../src/duet/run.js';
 import type { GitHubContextRef, GitHubReviewTarget } from '../../src/providers/code-provider.js';
 import {
+  serializeTaskSpec,
   sha256,
   taskSpecFingerprint,
+  type TaskSpecV1,
   type TaskSpecWithoutIntegrity,
 } from '../../src/duet/task-spec.js';
 import { TaskSpecStore } from '../../src/duet/task-spec-store.js';
+import { TaskContextStore } from '../../src/duet/task-context-store.js';
 
 let temporary: string;
 let requestFile: string;
@@ -43,6 +46,33 @@ const target: GitHubReviewTarget = { ...context, reviewRef: 'b'.repeat(40), test
 const target2: GitHubReviewTarget = { ...context, reviewRef: 'c'.repeat(40), testStatus: 'PASS' };
 const target3: GitHubReviewTarget = { ...context, reviewRef: 'd'.repeat(40), testStatus: 'PASS' };
 
+function compactTaskSpec(objective = 'Add a harmless document.'): TaskSpecV1 {
+  const content: TaskSpecWithoutIntegrity = {
+    version: 1,
+    taskId: 'demo',
+    mode: 'GITHUB',
+    objective,
+    scope: { allowed: ['docs'], forbidden: ['src'] },
+    acceptanceCriteria: [
+      { id: 'must-1', requirement: 'Add the requested document', priority: 'MUST' },
+    ],
+    exactLiterals: [],
+    protocolRequirements: [],
+    context: {
+      repository: context.repository,
+      taskBranch: context.taskBranch,
+      baseRef: context.baseRef,
+    },
+    source: { rawRequestSha256: sha256('Add a harmless document.') },
+    contracts: {
+      plannerPath: 'docs/contracts/planner-v1.md',
+      reviewerPath: 'docs/contracts/reviewer-v1.md',
+      resolution: 'AT_BASE_REF',
+    },
+  };
+  return { ...content, integrity: { sha256: taskSpecFingerprint(content) } };
+}
+
 beforeEach(async () => {
   temporary = await mkdtemp(path.join(os.tmpdir(), 'duet-orchestrator-'));
   requestFile = path.join(temporary, 'request.md');
@@ -61,6 +91,22 @@ beforeEach(async () => {
 afterEach(async () => rm(temporary, { recursive: true, force: true }));
 async function init() {
   await duet.init('demo', requestFile, outputFile);
+}
+async function initCompact(spec = compactTaskSpec()) {
+  await writeFile(taskSpecFile, JSON.stringify(spec), 'utf8');
+  const stateRoot = path.join(temporary, '.chatbridge');
+  const taskSpecs = new TaskSpecStore(stateRoot);
+  const taskContexts = new TaskContextStore(stateRoot);
+  const compactDuet = new DuetOrchestrator(
+    provider as never,
+    store,
+    historyVerifier,
+    undefined,
+    taskSpecs,
+    taskContexts,
+  );
+  await compactDuet.init('demo', requestFile, outputFile, 8, taskSpecFile);
+  return { compactDuet, taskSpecs, taskContexts, spec };
 }
 async function respond(
   state: 'PLAN' | 'BLOCKED' | 'FAILED' | 'DONE',
@@ -141,12 +187,14 @@ describe('DuetOrchestrator', () => {
     };
     await writeFile(taskSpecFile, JSON.stringify(taskSpec), 'utf8');
     const taskSpecs = new TaskSpecStore(path.join(temporary, '.chatbridge'));
+    const taskContexts = new TaskContextStore(path.join(temporary, '.chatbridge'));
     const compactDuet = new DuetOrchestrator(
       provider as never,
       store,
       historyVerifier,
       undefined,
       taskSpecs,
+      taskContexts,
     );
     await compactDuet.init('demo', requestFile, outputFile, 8, taskSpecFile);
     expect(await taskSpecs.read('demo')).toEqual(taskSpec);
@@ -165,6 +213,12 @@ describe('DuetOrchestrator', () => {
         await readFile(store.iterationArtifactPath('demo', 1, 'planner-control.json'), 'utf8'),
       ),
     ).toMatchObject({ version: 1, sha256: sha256(planner), bytes: Buffer.byteLength(planner) });
+    expect(await taskContexts.read('demo')).toEqual({
+      version: 1,
+      taskId: 'demo',
+      taskSpecSha256: taskSpec.integrity.sha256,
+      plannerControlSha256: sha256(planner),
+    });
 
     await respond('PLAN');
     await compactDuet.ingest('demo', responseFile);
@@ -182,6 +236,90 @@ describe('DuetOrchestrator', () => {
         await readFile(store.iterationArtifactPath('demo', 1, 'reviewer-control.json'), 'utf8'),
       ),
     ).toMatchObject({ version: 1, sha256: sha256(reviewer), bytes: Buffer.byteLength(reviewer) });
+  });
+
+  it('fails before M2 review preparation when a Compact TaskSpec is missing', async () => {
+    const { compactDuet, taskSpecs } = await initCompact();
+    await respond('PLAN');
+    await compactDuet.ingest('demo', responseFile);
+    await compactDuet.beginExecution('demo');
+    await unlink(taskSpecs.pathFor('demo'));
+    provider.getReviewTarget.mockClear();
+    await expect(compactDuet.prepareReview('demo', 'PASS', outputFile)).rejects.toMatchObject({
+      code: 'TASK_SPEC_MISSING',
+    });
+    expect(provider.getReviewTarget).not.toHaveBeenCalled();
+    expect(await store.read('demo')).toMatchObject({ state: 'EXECUTING' });
+  });
+
+  it('fails before M2 review preparation when the Compact TaskSpec fingerprint diverges', async () => {
+    const { compactDuet, taskSpecs } = await initCompact();
+    await respond('PLAN');
+    await compactDuet.ingest('demo', responseFile);
+    await compactDuet.beginExecution('demo');
+    await writeFile(
+      taskSpecs.pathFor('demo'),
+      serializeTaskSpec(compactTaskSpec('Different but internally valid semantics')),
+      'utf8',
+    );
+    provider.getReviewTarget.mockClear();
+    await expect(compactDuet.prepareReview('demo', 'PASS', outputFile)).rejects.toMatchObject({
+      code: 'TASK_SPEC_FINGERPRINT_MISMATCH',
+    });
+    expect(provider.getReviewTarget).not.toHaveBeenCalled();
+    expect(await store.read('demo')).toMatchObject({ state: 'EXECUTING' });
+  });
+
+  it('fails before M2 review preparation when pinned Planner control evidence diverges', async () => {
+    const { compactDuet } = await initCompact();
+    await respond('PLAN');
+    await compactDuet.ingest('demo', responseFile);
+    await compactDuet.beginExecution('demo');
+    await writeFile(
+      store.iterationArtifactPath('demo', 1, 'planner-control.txt'),
+      'tampered planner control',
+      'utf8',
+    );
+    provider.getReviewTarget.mockClear();
+    await expect(compactDuet.prepareReview('demo', 'PASS', outputFile)).rejects.toMatchObject({
+      code: 'PLANNER_CONTROL_FINGERPRINT_MISMATCH',
+    });
+    expect(provider.getReviewTarget).not.toHaveBeenCalled();
+  });
+
+  it('recovers identical torn init evidence but rejects divergent immutable TaskSpec content', async () => {
+    const stateRoot = path.join(temporary, '.chatbridge');
+    const taskSpecs = new TaskSpecStore(stateRoot);
+    const original = compactTaskSpec();
+    await taskSpecs.createOrVerify(original);
+    const originalBytes = await readFile(taskSpecs.pathFor('demo'), 'utf8');
+    const recovered = await initCompact(original);
+    expect(await store.read('demo')).toMatchObject({ state: 'PLANNING' });
+    expect(await readFile(taskSpecs.pathFor('demo'), 'utf8')).toBe(originalBytes);
+    await expect(
+      recovered.compactDuet.init('demo', requestFile, outputFile, 8, taskSpecFile),
+    ).rejects.toMatchObject({ code: 'RUN_ALREADY_EXISTS' });
+
+    await rm(stateRoot, { recursive: true, force: true });
+    store = new DuetRunStore(stateRoot);
+    const divergentStore = new TaskSpecStore(stateRoot);
+    await divergentStore.createOrVerify(original);
+    const beforeDivergence = await readFile(divergentStore.pathFor('demo'), 'utf8');
+    const divergent = compactTaskSpec('Divergent TaskSpec candidate');
+    await writeFile(taskSpecFile, JSON.stringify(divergent), 'utf8');
+    const divergentDuet = new DuetOrchestrator(
+      provider as never,
+      store,
+      historyVerifier,
+      undefined,
+      divergentStore,
+      new TaskContextStore(stateRoot),
+    );
+    await expect(
+      divergentDuet.init('demo', requestFile, outputFile, 8, taskSpecFile),
+    ).rejects.toMatchObject({ code: 'TASK_SPEC_IMMUTABLE' });
+    expect(await readFile(divergentStore.pathFor('demo'), 'utf8')).toBe(beforeDivergence);
+    expect(await store.read('demo')).toBeUndefined();
   });
 
   it('rejects an oversized compact envelope before producing Browser or pending-send input', async () => {
@@ -212,12 +350,14 @@ describe('DuetOrchestrator', () => {
       'utf8',
     );
     const taskSpecs = new TaskSpecStore(path.join(temporary, '.chatbridge'));
+    const taskContexts = new TaskContextStore(path.join(temporary, '.chatbridge'));
     const compactDuet = new DuetOrchestrator(
       provider as never,
       store,
       historyVerifier,
       undefined,
       taskSpecs,
+      taskContexts,
     );
     await expect(
       compactDuet.init('demo', requestFile, outputFile, 8, taskSpecFile),

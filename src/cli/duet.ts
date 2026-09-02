@@ -10,6 +10,7 @@ import { ExecutionStore } from '../duet/execution-store.js';
 import { GitExecutionWorkspaceInspector } from '../duet/execution-workspace-inspector.js';
 import { TaskOperationLock } from '../duet/task-operation-lock.js';
 import { TaskSpecStore } from '../duet/task-spec-store.js';
+import { TaskContextStore } from '../duet/task-context-store.js';
 
 function orchestrator(): DuetOrchestrator {
   const cwd = process.cwd();
@@ -25,6 +26,7 @@ function orchestrator(): DuetOrchestrator {
       lock: new TaskOperationLock(stateRoot),
     },
     new TaskSpecStore(stateRoot),
+    new TaskContextStore(stateRoot),
   );
 }
 

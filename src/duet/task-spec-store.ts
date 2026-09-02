@@ -24,21 +24,23 @@ export class TaskSpecStore {
     }
   }
 
-  async create(value: TaskSpecV1): Promise<void> {
+  async createOrVerify(value: TaskSpecV1): Promise<void> {
     const spec = TaskSpecV1Schema.parse(value);
     const file = this.pathFor(spec.taskId);
+    const serialized = serializeTaskSpec(spec);
     await mkdir(path.dirname(file), { recursive: true });
     const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
     try {
-      await writeFile(temporary, serializeTaskSpec(spec), { encoding: 'utf8', flag: 'wx' });
+      await writeFile(temporary, serialized, { encoding: 'utf8', flag: 'wx' });
       await link(temporary, file);
     } catch (error: any) {
-      if (error?.code === 'EEXIST')
+      if (error?.code !== 'EEXIST') throw error;
+      const existing = await this.read(spec.taskId);
+      if (!existing || serializeTaskSpec(existing) !== serialized)
         throw new ChatbridgeError(
-          'TaskSpec already exists and Phase 1 does not support amendments',
+          'TaskSpec already exists with different semantic content; amendments are unsupported',
           'TASK_SPEC_IMMUTABLE',
         );
-      throw error;
     } finally {
       await unlink(temporary).catch(() => undefined);
     }

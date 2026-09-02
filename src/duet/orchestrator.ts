@@ -22,7 +22,8 @@ import { iterativeReviewEnvelope } from './review-envelope.js';
 import { assertGitHubResponseIdentity } from './response-identity.js';
 import { ExecutionStore } from './execution-store.js';
 import { TaskSpecStore } from './task-spec-store.js';
-import { validateTaskSpecCandidate } from './task-spec.js';
+import { validateTaskSpecCandidate, type TaskSpecV1 } from './task-spec.js';
+import { TaskContextStore, type TaskContextV1 } from './task-context-store.js';
 import {
   assertCompactC2CPayload,
   plannerControlEnvelope,
@@ -95,6 +96,7 @@ export class DuetOrchestrator {
     private readonly historyVerifier: ReviewHistoryVerifier,
     private readonly execution?: ExecutionDependencies,
     private readonly taskSpecs?: TaskSpecStore,
+    private readonly taskContexts?: TaskContextStore,
   ) {}
 
   async init(
@@ -109,16 +111,14 @@ export class DuetOrchestrator {
       throw new ChatbridgeError(`Run already exists for ${taskId}`, 'RUN_ALREADY_EXISTS');
     const request = await readFile(requestFile, 'utf8');
     if (!request.trim()) throw new ChatbridgeError('Request file is empty', 'REQUEST_EMPTY');
-    let taskSpecCandidate: unknown;
+    let taskSpecCandidate: TaskSpecV1 | undefined;
     if (taskSpecFile) {
-      if (!this.taskSpecs)
+      if (!this.taskSpecs || !this.taskContexts)
         throw new ChatbridgeError('TaskSpec storage is unavailable', 'TASK_SPEC_STORE_UNAVAILABLE');
-      taskSpecCandidate = JSON.parse(await readFile(taskSpecFile, 'utf8')) as unknown;
-      validateTaskSpecCandidate(taskSpecCandidate, {
-        taskId,
-        mode: 'GITHUB',
-        rawRequest: request,
-      });
+      taskSpecCandidate = validateTaskSpecCandidate(
+        JSON.parse(await readFile(taskSpecFile, 'utf8')) as unknown,
+        { taskId, mode: 'GITHUB', rawRequest: request },
+      );
     }
     const limits = MaxIterationsSchema.safeParse(maxIterationsInput);
     if (!limits.success)
@@ -156,9 +156,26 @@ export class DuetOrchestrator {
     const plannerEnvelope = taskSpec
       ? plannerControlEnvelope(context, taskSpec, run.iteration)
       : planningEnvelope(run, request);
+    const taskContext: TaskContextV1 | undefined = taskSpec
+      ? {
+          version: 1,
+          taskId,
+          taskSpecSha256: taskSpec.integrity.sha256,
+          plannerControlSha256: sha256(plannerEnvelope),
+        }
+      : undefined;
+    if (taskContext) {
+      const existing = await this.taskContexts!.read(taskId);
+      if (existing && !sameTaskContext(existing, taskContext))
+        throw new ChatbridgeError(
+          'TaskContext already exists with different compact-task evidence',
+          'TASK_CONTEXT_IMMUTABLE',
+        );
+    }
     await this.store.writeRequestArtifact(taskId, request);
-    if (taskSpec) await this.taskSpecs!.create(taskSpec);
+    if (taskSpec) await this.taskSpecs!.createOrVerify(taskSpec);
     if (taskSpec) await this.persistControl(run.taskId, run.iteration, 'planner', plannerEnvelope);
+    if (taskContext) await this.taskContexts!.createOrVerify(taskContext);
     await this.store.write(run);
     await writeFile(outputFile, plannerEnvelope, 'utf8');
     return run;
@@ -344,11 +361,12 @@ export class DuetOrchestrator {
     this.requireNoHalt(run);
     this.transition(run.state, 'EXECUTED');
     if (this.execution) await this.requirePrepareReviewEvidence(run, tests);
+    const taskSpec = await this.resolveCompactTaskSpec(run);
     const rawTarget = await this.provider.getReviewTarget(run.taskId, tests);
     if (rawTarget.mode !== 'GITHUB')
       throw new ChatbridgeError('M3.0 supports GITHUB mode only', 'MODE_MISMATCH');
     const reviewTarget = rawTarget as GitHubReviewTarget;
-    const { updated, envelope } = await this.persistExecutedReview(run, reviewTarget);
+    const { updated, envelope } = await this.persistExecutedReview(run, reviewTarget, taskSpec);
     await writeFile(outputFile, envelope, 'utf8');
     return updated;
   }
@@ -637,7 +655,8 @@ export class DuetOrchestrator {
       reviewRef: evidence.reviewRef,
       testStatus: evidence.testStatus,
     };
-    await this.persistExecutedReview(run, reviewTarget);
+    const taskSpec = await this.resolveCompactTaskSpec(run);
+    await this.persistExecutedReview(run, reviewTarget, taskSpec);
     return {
       ...reconciliationIdentity(run, workspace, base),
       classification: 'CURRENT_ITERATION_M2_PREPARED',
@@ -650,6 +669,7 @@ export class DuetOrchestrator {
   private async persistExecutedReview(
     run: DuetRunCheckpointV2,
     reviewTarget: GitHubReviewTarget,
+    taskSpec: TaskSpecV1 | undefined,
   ): Promise<{ updated: DuetRunCheckpointV2; envelope: string }> {
     const previousReviewRef = previousReviewTarget(run)?.reviewRef;
     if (
@@ -661,7 +681,6 @@ export class DuetOrchestrator {
         'Previous REVIEW_REF is not an ancestor of current REVIEW_REF',
         'REVIEW_HISTORY_DIVERGED',
       );
-    const taskSpec = await this.taskSpecs?.read(run.taskId);
     const envelope = taskSpec
       ? reviewerControlEnvelope(
           reviewTarget,
@@ -688,6 +707,49 @@ export class DuetOrchestrator {
     if (taskSpec) await this.persistControl(run.taskId, run.iteration, 'reviewer', envelope);
     await this.store.write(updated);
     return { updated, envelope };
+  }
+
+  private async resolveCompactTaskSpec(run: DuetRunCheckpointV2): Promise<TaskSpecV1 | undefined> {
+    const [taskContext, taskSpec] = await Promise.all([
+      this.taskContexts?.read(run.taskId),
+      this.taskSpecs?.read(run.taskId),
+    ]);
+    if (!taskContext) {
+      if (taskSpec)
+        throw new ChatbridgeError(
+          'TaskSpec exists without the Compact-C2C task marker',
+          'TASK_CONTEXT_MISSING',
+        );
+      return undefined;
+    }
+    if (!taskSpec)
+      throw new ChatbridgeError(
+        'Compact-C2C task is missing its authoritative TaskSpec',
+        'TASK_SPEC_MISSING',
+      );
+    if (taskSpec.integrity.sha256 !== taskContext.taskSpecSha256)
+      throw new ChatbridgeError(
+        'TaskSpec fingerprint does not match TaskContext',
+        'TASK_SPEC_FINGERPRINT_MISMATCH',
+      );
+    let plannerControl: string;
+    try {
+      plannerControl = await readFile(
+        this.store.iterationArtifactPath(run.taskId, 1, 'planner-control.txt'),
+        'utf8',
+      );
+    } catch {
+      throw new ChatbridgeError(
+        'Compact-C2C task is missing its Planner control artifact',
+        'PLANNER_CONTROL_MISSING',
+      );
+    }
+    if (sha256(plannerControl) !== taskContext.plannerControlSha256)
+      throw new ChatbridgeError(
+        'Planner control fingerprint does not match TaskContext',
+        'PLANNER_CONTROL_FINGERPRINT_MISMATCH',
+      );
+    return taskSpec;
   }
 
   private async persistControl(
@@ -855,6 +917,15 @@ function reconciliationIdentity(
 
 function hasPlan(run: DuetRunCheckpoint): boolean {
   return run.version === 1 ? Boolean(run.plan) : Boolean(run.iterations[run.iteration - 1]);
+}
+
+function sameTaskContext(left: TaskContextV1, right: TaskContextV1): boolean {
+  return (
+    left.version === right.version &&
+    left.taskId === right.taskId &&
+    left.taskSpecSha256 === right.taskSpecSha256 &&
+    left.plannerControlSha256 === right.plannerControlSha256
+  );
 }
 
 function historySummary(

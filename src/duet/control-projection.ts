@@ -32,6 +32,12 @@ export function plannerControlEnvelope(
         .map((criterion) => `${criterion.id}: ${criterion.requirement}`),
     ),
     section(
+      'Should accept',
+      taskSpec.acceptanceCriteria
+        .filter((criterion) => criterion.priority === 'SHOULD')
+        .map((criterion) => `${criterion.id}: ${criterion.requirement}`),
+    ),
+    section(
       'Exact literals',
       taskSpec.exactLiterals.map(
         (literal) =>
@@ -46,6 +52,7 @@ export function plannerControlEnvelope(
       ),
     ),
     section('Planner notes', taskSpec.guidance?.plannerNotes ?? []),
+    section('Review criteria', taskSpec.guidance?.reviewCriteria ?? []),
     'Use repository context from the GitHub Data Plane.\nReturn only C2C/1.',
   ].filter(Boolean);
   const envelope = serializeEnvelope({

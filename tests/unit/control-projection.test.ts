@@ -45,6 +45,10 @@ function taskSpec() {
     protocolRequirements: [
       { id: 'send', requirement: 'Never replay ambiguous send', replaySafety: 'NON_IDEMPOTENT' },
     ],
+    guidance: {
+      plannerNotes: ['Keep the plan concise'],
+      reviewCriteria: ['Verify the immutable range'],
+    },
     context: {
       repository: context.repository,
       taskBranch: context.taskBranch,
@@ -78,7 +82,7 @@ function sizedEnvelope(bytes: number): string {
 }
 
 describe('compact control projections', () => {
-  it('emits deterministic Planner semantics without stable boilerplate or SHOULD criteria', () => {
+  it('projects every TaskSpec semantic field into the first Planner turn', () => {
     const first = plannerControlEnvelope(context, taskSpec());
     expect(plannerControlEnvelope(context, taskSpec())).toBe(first);
     expect(first).toContain('docs/contracts/planner-v1.md');
@@ -86,10 +90,28 @@ describe('compact control projections', () => {
     expect(first).toContain('Keep C2C/1');
     expect(first).toContain('C2C_PAYLOAD_TOO_LARGE');
     expect(first).toContain('replaySafety=NON_IDEMPOTENT');
-    expect(first).not.toContain('Optional polish');
-    expect(first).not.toContain('Planner notes:');
+    expect(first).toContain('Optional polish');
+    expect(first).toContain('Keep the plan concise');
+    expect(first).toContain('Verify the immutable range');
     expect(first).not.toContain('Act as Planner and Architect');
     expect(first).toContain(`BASE_REF: ${context.baseRef}`);
+    expect(
+      Object.keys(taskSpec()).filter(
+        (key) =>
+          !['version', 'taskId', 'mode', 'context', 'source', 'contracts', 'integrity'].includes(
+            key,
+          ),
+      ),
+    ).toEqual([
+      'objective',
+      'scope',
+      'acceptanceCriteria',
+      'exactLiterals',
+      'protocolRequirements',
+      'guidance',
+    ]);
+    expect(Object.keys(taskSpec().scope)).toEqual(['allowed', 'forbidden']);
+    expect(Object.keys(taskSpec().guidance ?? {})).toEqual(['plannerNotes', 'reviewCriteria']);
   });
 
   it('emits a compact immutable Reviewer control with optional delta focus', () => {

@@ -12,6 +12,7 @@ import { LocalCodeProvider } from '../local/local-code-provider.js';
 import { LocalLifecycle } from '../local/lifecycle.js';
 import { StoredLocalLifecycleGates } from '../local/lifecycle-gates.js';
 import { LocalTaskSpecStore } from '../local/task-spec.js';
+import { LocalDiscussion } from '../local/discussion.js';
 
 export function registerLocalLifecycleCommands(
   local: Command,
@@ -29,6 +30,7 @@ export function registerLocalLifecycleCommands(
       taskId,
       stateRoot,
       provider,
+      discussion: new LocalDiscussion(stateRoot, provider, snapshots),
       lifecycle: new LocalLifecycle(
         stateRoot,
         provider,
@@ -36,6 +38,50 @@ export function registerLocalLifecycleCommands(
         new StoredLocalLifecycleGates(stateRoot),
       ),
     };
+  }
+  local
+    .command('discussion-prepare')
+    .description('Prepare or recover one explicit LOCAL Discussion round; never sends')
+    .requiredOption('--task <id>')
+    .requiredOption('--round <n>')
+    .requiredOption('--request-file <path>')
+    .action(async (o: { task: string; round: string; requestFile: string }) => {
+      const round = z.coerce.number().int().min(1).max(3).parse(o.round);
+      const question = await readFile(path.resolve(cwd(), o.requestFile), 'utf8');
+      const { taskId, stateRoot, discussion } = await runtime(o.task);
+      const control = await discussion.prepare(taskId, round, question);
+      report({
+        control,
+        controlFile: path.join(
+          stateRoot,
+          'runs',
+          taskId,
+          'discussion',
+          `round-${round}`,
+          'request.json',
+        ),
+      });
+    });
+  local
+    .command('discussion-ingest')
+    .requiredOption('--task <id>')
+    .requiredOption('--message-file <path>')
+    .action(async (o: { task: string; messageFile: string }) => {
+      const response = await readFile(path.resolve(cwd(), o.messageFile), 'utf8');
+      const { taskId, discussion } = await runtime(o.task);
+      report(await discussion.ingest(taskId, response));
+    });
+  for (const [name, method] of [
+    ['discussion-status', 'status'],
+    ['discussion-recover', 'recover'],
+  ] as const) {
+    local
+      .command(name)
+      .requiredOption('--task <id>')
+      .action(async (o: { task: string }) => {
+        const { taskId, discussion } = await runtime(o.task);
+        report(await discussion[method](taskId));
+      });
   }
   local
     .command('run-init')

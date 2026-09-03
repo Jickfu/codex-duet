@@ -117,18 +117,32 @@ describe('LOCAL CLI data-plane integration', () => {
     const outbound = path.join(stateRoot, 'outbound.txt');
     const inbound = path.join(stateRoot, 'inbound.txt');
     const discussion = new DiscussionStore(stateRoot);
-    const control = {
-      version: 1 as const,
-      kind: 'DISCUSSION_CONTROL' as const,
-      taskId: 'demo',
-      iteration: 1,
-      round: 1,
-      provider: 'CODEX_BROWSER' as const,
-      taskSpecSha256: spec.integrity.sha256,
-      interactionPolicySha256: sha256(canonicalJson(policy)),
-      requestSha256: sha256('Discuss'),
-      content: 'Discuss',
-    };
+    const questionFile = path.join(stateRoot, 'discussion-question.txt');
+    await writeFile(questionFile, 'Discuss');
+    const preparedDiscussion = await cli(
+      'discussion-prepare',
+      '--task',
+      'demo',
+      '--round',
+      '1',
+      '--request-file',
+      questionFile,
+    );
+    const control = preparedDiscussion.control;
+    expect(await readFile(preparedDiscussion.controlFile, 'utf8')).toBe(
+      canonicalJson(control) + '\n',
+    );
+    expect(
+      await cli(
+        'discussion-prepare',
+        '--task',
+        'demo',
+        '--round',
+        '1',
+        '--request-file',
+        questionFile,
+      ),
+    ).toEqual(preparedDiscussion);
     const answer = {
       version: 1 as const,
       kind: 'DISCUSSION_RESPONSE' as const,
@@ -142,24 +156,7 @@ describe('LOCAL CLI data-plane integration', () => {
       outcome: 'CONVERGED' as const,
       content: 'Agreed fixture',
     };
-    await discussion.createControl(control);
-    await discussion.createResponse(answer);
-    await discussion.writeSummary({
-      version: 1,
-      taskId: 'demo',
-      provider: 'CODEX_BROWSER',
-      maxRounds: 3,
-      status: 'CONVERGED',
-      rounds: [
-        {
-          round: 1,
-          requestSha256: control.requestSha256,
-          responseSha256: sha256(canonicalJson(answer)),
-          outcome: 'CONVERGED',
-        },
-      ],
-    });
-    // A summary alone is not Browser response evidence.
+    const pendingSummary = await discussion.readSummary('demo');
     await expect(cli('run-init', '--task', 'demo')).rejects.toThrow();
     await writeFile(outbound, canonicalJson(control) + '\n');
     await interaction.prepareCodexBrowser(
@@ -171,7 +168,16 @@ describe('LOCAL CLI data-plane integration', () => {
     await interaction.markCodexBrowserAttempted('demo');
     await interaction.completeCodexBrowser('demo', 'CONFIRMED', url);
     await writeFile(inbound, JSON.stringify(answer));
+    await expect(
+      cli('discussion-ingest', '--task', 'demo', '--message-file', inbound),
+    ).rejects.toThrow();
     await interaction.recordCodexBrowserResponse('demo', inbound, url);
+    await cli('discussion-ingest', '--task', 'demo', '--message-file', inbound);
+    await cli('discussion-ingest', '--task', 'demo', '--message-file', inbound);
+    await discussion.writeSummary(pendingSummary!); // Simulated crash before summary publication.
+    expect((await cli('discussion-status', '--task', 'demo')).status).toBe('CONVERGED');
+    await expect(cli('run-init', '--task', 'demo')).rejects.toThrow();
+    expect((await cli('discussion-recover', '--task', 'demo')).status).toBe('CONVERGED');
     const run = await cli('run-init', '--task', 'demo');
     expect(run.state).toBe('PLANNING');
     async function exchange(

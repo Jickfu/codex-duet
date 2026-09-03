@@ -50,7 +50,18 @@ chatbridge local begin-execution --task demo
 chatbridge local run-prepare-review --task demo
 ```
 
-Persist an explicit interaction policy using the existing interaction-policy workflow before run-init. Enabled Discussion must already have complete, verified convergence evidence. The LOCAL Discussion producer CLI remains pending; a manually written CONVERGED summary cannot bypass the Browser artifact check.
+Persist an explicit interaction policy using the existing interaction-policy workflow before run-init. Enabled Discussion must already have complete, verified convergence evidence; a manually written CONVERGED summary cannot bypass the Browser artifact check.
+
+Use the [LOCAL Discussion commands](adr/ADR-021-local-discussion-recovery.md) after binding TaskSpec and before run-init:
+
+```text
+chatbridge local discussion-prepare --task demo --round 1 --request-file .chatbridge/question.txt
+chatbridge local discussion-ingest --task demo --message-file .chatbridge/discussion-response.json
+chatbridge local discussion-status --task demo
+chatbridge local discussion-recover --task demo
+```
+
+Preparation returns `control` and `controlFile`. Send the exact file through the selected Browser workflow, including its terminal newline, and record the received Browser bytes before Discussion ingestion. A next round requires the previous outcome CONTINUE and an explicit next round number; the limit is three. Retrying the same round/question recovers its original control, not a new send. Status is read-only; recover repairs a missing or stale summary only from validated immutable round evidence. BLOCKED and FAILED never auto-continue.
 
 Use the existing Codex Browser interaction commands to prepare, attempt, confirm and receive the exact control/response bytes. `confirm-control` validates that evidence; it does not send. `ingest-response` requires the exact recorded Browser response. After PLAN is accepted, begin-execution records intent; the caller edits and tests, uses capture/record-evidence, then run-prepare-review persists EXECUTED. Confirm and receive the Reviewer exchange before ingesting the result.
 

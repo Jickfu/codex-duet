@@ -10,6 +10,7 @@ import { doctor } from './doctor.js';
 import { detach } from './detach.js';
 import { ChatbridgeError } from '../core/errors.js';
 import { githubDoctor, githubInitTask, githubPrepareReview, githubStatus } from './github.js';
+import { registerLocalCommands } from './local.js';
 import {
   duetBeginExecution,
   duetIngest,
@@ -36,6 +37,7 @@ const program = new Command()
     if (command.opts().debug) process.env.CHATBRIDGE_DEBUG = '1';
   });
 const browser = program.command('browser').description('Manage the isolated browser');
+registerLocalCommands(program);
 browser
   .command('open')
   .description('Compatibility alias for browser attach')

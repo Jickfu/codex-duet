@@ -1,10 +1,31 @@
 # LOCAL mode
 
-Status: **PLANNED M4/M5**
+Status: **M4 IN PROGRESS; M5 PLANNED**
 
-LOCAL mode is for private, unpushed, or uncommitted workspaces. It preserves Codex as the sole Executor while allowing ChatGPT Web to read the current workspace through a bounded, read-only MCP Data Plane. Nothing in this document claims that Local MCP, `submit_response`, or cloudflared is implemented.
+LOCAL mode is for private, unpushed, or uncommitted workspaces. It preserves Codex as the sole Executor. Immutable Git-worktree snapshots, snapshot-bound read services, a loopback MCP server library, optional capability-scoped response ingress, and the data-plane CLI below are implemented. The complete LOCAL task lifecycle and remote ChatGPT access are not yet integrated. cloudflared remains M5.
 
-Future LOCAL MCP will expose repository context and the same repository-resident Planner/Reviewer contracts read-only. Local TaskSpec remains separate orchestration authority; M3.2c Phase 1 does not expose it through MCP or implement LOCAL task execution.
+## Implemented data-plane CLI
+
+Run at a Git worktree root with an existing HEAD. No remote is required; pre-existing dirty files are permitted. These commands create task-scoped metadata under `.chatbridge`, but never commit, push, execute tests, send messages or approve review results. `duet` remains the existing GITHUB lifecycle entry point; these commands do not substitute for a LOCAL PLAN/Discussion/execution gate.
+
+```text
+chatbridge local init-task --task demo
+chatbridge local assert-ready --task demo
+chatbridge local capture --task demo
+chatbridge local record-evidence --task demo --evidence-file .chatbridge/evidence-input.json
+chatbridge local prepare-review --task demo --iteration 1
+chatbridge local status --task demo
+```
+
+Initialize before editing to preserve the baseline. After authorized edits, capture a candidate, run tests yourself against that candidate, then supply its exact snapshot identity in the evidence file. Keep the input file under `.chatbridge` or outside the workspace so creating it does not change the review surface. `record-evidence` verifies live state still matches the named snapshot; it records the caller's assertion, not independent proof that tests ran.
+
+The evidence file is a strict JSON object with `tests` and `execution` fields. Both contain `version: 1`, `taskId`, positive `iteration`, exact `snapshotId`, and a `summary` string. `tests` additionally requires `status` (`PASS`, `FAIL`, or `NOT_RUN`) and `recordedAt` (ISO timestamp). Preserve the complete original input for immutable replay; changing its timestamp or summary is not an identical retry.
+
+`prepare-review` requires matching durable evidence and returns a `LocalReviewTargetV1`, never a GitHub `REVIEW_REF`. The current prepared iteration replays its immutable target even after live edits; `assert-ready` separately rejects live drift. New iterations must be sequential. The drift check is not execution authorization. `init-task` recovers existing context only when live state still matches the baseline or latest review; do not use it to reset a dirty in-progress task.
+
+LOCAL CLI integration is additive. TaskSpec/control projection, selected Browser provider, optional Discussion, full lifecycle crash/resume acceptance and M4 freeze remain pending.
+
+Snapshot-bound MCP tools expose allowed repository files read-only. Binding Planner/Reviewer contracts and the separate Local TaskSpec orchestration authority to the full LOCAL lifecycle remains integration work; M3.2c Phase 1 does not implement LOCAL task execution.
 
 ## Target architecture
 
@@ -44,10 +65,10 @@ sequenceDiagram
 LOCAL mode permits review of uncommitted state. Its review identity must not pretend that the observation is a Git commit:
 
 ```text
-LOCAL Review Snapshot / Fingerprint contract: DEFERRED TO M4
+LOCAL Review Snapshot / Fingerprint contract: ADR-017
 ```
 
-M4 must bind each review to a reliable, explicit local workspace observation or snapshot. It must not reuse the GITHUB `REVIEW_REF` contract without a separate design.
+The implemented provider binds each review to explicit immutable snapshots and a review-target fingerprint under [ADR-017](adr/ADR-017-local-review-identity.md). It does not reuse the GITHUB `REVIEW_REF` contract.
 
 ## Current and target response paths
 
@@ -73,7 +94,7 @@ The target avoids repeated agent-driven page snapshots, DOM reading, or browser 
 
 ## Read-only MCP tools
 
-The planned workspace read surface is limited to:
+The implemented server library's workspace read surface is limited to:
 
 ```text
 workspace_info
@@ -86,7 +107,7 @@ test_status
 execution_summary
 ```
 
-The planned control/return tool is:
+The disabled-by-default, capability-scoped control/return tool is:
 
 ```text
 submit_response

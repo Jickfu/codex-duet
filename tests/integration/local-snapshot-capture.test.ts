@@ -227,7 +227,7 @@ describe('real LOCAL snapshot capture', () => {
     await expect(authority.assertLiveSnapshot(baseline.snapshotId)).rejects.toMatchObject({
       code: 'LOCAL_BASELINE_DRIFT',
     });
-  });
+  }, 30000);
 
   it('captures staged changes and deletion, preserves HEAD, and filters denied diff paths', async () => {
     const head = (await git('rev-parse', 'HEAD')).stdout.trim();

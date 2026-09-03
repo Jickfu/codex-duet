@@ -9,6 +9,12 @@ import { GitLocalSnapshotAuthority } from '../local/git-snapshot-authority.js';
 import { LocalCodeProvider } from '../local/local-code-provider.js';
 import { LocalEvidenceStore } from '../local/evidence-store.js';
 import {
+  LocalTaskSpecStore,
+  assertLocalContracts,
+  validateLocalTaskSpec,
+} from '../local/task-spec.js';
+import { localControlEnvelope } from '../local/control-projection.js';
+import {
   LocalExecutionSummaryV1Schema,
   LocalTestEvidenceV1Schema,
 } from '../local/workspace-service.js';
@@ -52,6 +58,60 @@ export function registerLocalCommands(
   const local = program
     .command('local')
     .description('LOCAL snapshot data plane (no commit, push or test execution)');
+  local
+    .command('bind-task-spec')
+    .description('Bind immutable LOCAL semantics before execution; no message send')
+    .requiredOption('--task <id>')
+    .requiredOption('--request-file <path>')
+    .requiredOption('--task-spec-file <path>')
+    .action(async (o: { task: string; requestFile: string; taskSpecFile: string }) => {
+      const [request, candidate] = await Promise.all([
+        readFile(path.resolve(cwd(), o.requestFile), 'utf8'),
+        readFile(path.resolve(cwd(), o.taskSpecFile), 'utf8'),
+      ]);
+      await run(o.task, async ({ taskId, provider, snapshots }) => {
+        const state = await provider.status(taskId);
+        if (state.reviews.length !== 0)
+          throw new ChatbridgeError(
+            'TaskSpec must be bound before reviews',
+            'LOCAL_SPEC_BINDING_TOO_LATE',
+          );
+        const spec = validateLocalTaskSpec(JSON.parse(candidate), state.context, request);
+        // Fail compact-envelope and contract checks before publishing durable semantics.
+        localControlEnvelope(spec);
+        await assertLocalContracts(spec, snapshots.store);
+        await snapshots.assertLiveSnapshot(state.context.baselineSnapshotId);
+        await new LocalTaskSpecStore(path.join(cwd(), '.chatbridge')).createOrVerify(
+          spec,
+          state.context,
+        );
+        return { taskId, taskSpecSha256: spec.integrity.sha256, bound: true };
+      });
+    });
+  local
+    .command('project-control')
+    .description('Produce LOCAL C2C without sending or accepting lifecycle transitions')
+    .requiredOption('--task <id>')
+    .option('--review', 'project the current already-prepared review')
+    .action((o: { task: string; review?: boolean }) =>
+      run(o.task, async ({ taskId, provider, snapshots }) => {
+        const state = await provider.status(taskId);
+        const spec = await new LocalTaskSpecStore(path.join(cwd(), '.chatbridge')).read(
+          state.context,
+        );
+        await assertLocalContracts(spec, snapshots.store);
+        if (o.review) {
+          if (!state.reviews.length)
+            throw new ChatbridgeError('No prepared review', 'LOCAL_REVIEW_REQUIRED');
+          const target = await provider.prepareReview({ taskId, iteration: state.reviews.length });
+          return { envelope: localControlEnvelope(spec, target) };
+        }
+        if (state.reviews.length)
+          throw new ChatbridgeError('Initial planning is closed', 'LOCAL_PLANNING_CLOSED');
+        await snapshots.assertLiveSnapshot(state.context.baselineSnapshotId);
+        return { envelope: localControlEnvelope(spec) };
+      }),
+    );
   local
     .command('init-task')
     .requiredOption('--task <id>')

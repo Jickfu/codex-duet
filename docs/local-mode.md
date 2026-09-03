@@ -23,9 +23,19 @@ The evidence file is a strict JSON object with `tests` and `execution` fields. B
 
 `prepare-review` requires matching durable evidence and returns a `LocalReviewTargetV1`, never a GitHub `REVIEW_REF`. The current prepared iteration replays its immutable target even after live edits; `assert-ready` separately rejects live drift. New iterations must be sequential. The drift check is not execution authorization. `init-task` recovers existing context only when live state still matches the baseline or latest review; do not use it to reset a dirty in-progress task.
 
-LOCAL CLI integration is additive. TaskSpec/control projection, selected Browser provider, optional Discussion, full lifecycle crash/resume acceptance and M4 freeze remain pending.
+### Task semantics and control projection
 
-Snapshot-bound MCP tools expose allowed repository files read-only. Binding Planner/Reviewer contracts and the separate Local TaskSpec orchestration authority to the full LOCAL lifecycle remains integration work; M3.2c Phase 1 does not implement LOCAL task execution.
+Place both LOCAL contract documents in the workspace before initializing its baseline. Normalize the task into `LocalTaskSpecV1` with the baseline context returned by `init-task`, canonical SHA-256 integrity, and `AT_BASELINE_SNAPSHOT` contract resolution. See [ADR-018](adr/ADR-018-local-task-spec-control.md) for the identity and response rules.
+
+```text
+chatbridge local bind-task-spec --task demo --request-file .chatbridge/request.txt --task-spec-file .chatbridge/spec-input.json
+chatbridge local project-control --task demo
+chatbridge local project-control --task demo --review
+```
+
+Bind before editing; the first projection produces Planner control. The `--review` form requires an already-prepared review target. Output is JSON with an `envelope` string, not a send operation. Oversize messages fail without truncation. TaskSpec binding, compact LOCAL projections and response-identity validation are implemented, but connecting them to the selected Browser provider, optional Discussion, full lifecycle crash/resume acceptance and M4 freeze remains pending.
+
+Snapshot-bound MCP tools expose allowed repository files read-only. LOCAL has separate Planner/Reviewer contracts resolved at baseline, without changing frozen M3.2c or GITHUB contracts. End-to-end LOCAL task execution remains integration work.
 
 ## Target architecture
 

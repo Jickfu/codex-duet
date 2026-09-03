@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { registerLocalCommands } from '../../src/cli/local.js';
+import { localRequest, localSpec, rehashLocalSpec } from '../fixtures/local-task-spec.js';
+import { parseEnvelope } from '../../src/core/protocol.js';
 
 const execute = promisify(execFile);
 let root: string;
@@ -53,6 +55,83 @@ beforeEach(async () => {
 });
 
 describe('LOCAL CLI data-plane integration', () => {
+  it('binds baseline contracts and projects immutable semantic identity without sending', async () => {
+    await mkdir(path.join(root, 'docs', 'contracts'), { recursive: true });
+    for (const name of ['local-planner-v1.md', 'local-reviewer-v1.md']) {
+      await writeFile(
+        path.join(root, 'docs', 'contracts', name),
+        await readFile(path.resolve('docs', 'contracts', name)),
+      );
+    }
+    const context = await cli('init-task', '--task', 'demo');
+    const spec = localSpec(context);
+    const requestFile = path.join(root, '.chatbridge', 'request.txt');
+    const specFile = path.join(root, '.chatbridge', 'spec-input.json');
+    await writeFile(requestFile, localRequest);
+    const bind = [
+      'bind-task-spec',
+      '--task',
+      'demo',
+      '--request-file',
+      requestFile,
+      '--task-spec-file',
+      specFile,
+    ];
+    await writeFile(
+      specFile,
+      JSON.stringify(rehashLocalSpec({ ...spec, objective: '界'.repeat(4000) })),
+    );
+    await expect(cli(...bind)).rejects.toMatchObject({ code: 'C2C_PAYLOAD_TOO_LARGE' });
+    await expect(
+      readFile(path.join(root, '.chatbridge', 'runs', 'demo', 'local', 'task-spec.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    await writeFile(specFile, JSON.stringify(spec));
+    await cli(...bind);
+    await cli(...bind);
+    const planning = await cli('project-control', '--task', 'demo');
+    expect(parseEnvelope(planning.envelope).state).toBe('PLANNING');
+    expect(await cli('project-control', '--task', 'demo')).toEqual(planning);
+    await expect(cli('project-control', '--task', 'demo', '--review')).rejects.toMatchObject({
+      code: 'LOCAL_REVIEW_REQUIRED',
+    });
+    await writeFile(path.join(root, 'tracked.txt'), 'change\n');
+    await expect(cli('project-control', '--task', 'demo')).rejects.toThrow();
+    const candidate = await cli('capture', '--task', 'demo');
+    const file = await evidenceFile(candidate.snapshotId);
+    await cli('record-evidence', '--task', 'demo', '--evidence-file', file);
+    await cli('prepare-review', '--task', 'demo', '--iteration', '1');
+    const reviewed = await cli('project-control', '--task', 'demo', '--review');
+    expect(
+      JSON.parse(parseEnvelope(reviewed.envelope).content).identity.reviewTarget.reviewSnapshotId,
+    ).toBe(candidate.snapshotId);
+    await writeFile(path.join(root, 'tracked.txt'), 'later drift\n');
+    expect(await cli('project-control', '--task', 'demo', '--review')).toEqual(reviewed);
+    await expect(cli('project-control', '--task', 'demo')).rejects.toMatchObject({
+      code: 'LOCAL_PLANNING_CLOSED',
+    });
+  }, 60_000);
+
+  it('rejects contracts absent from the immutable baseline before binding semantics', async () => {
+    const context = await cli('init-task', '--task', 'demo');
+    const requestFile = path.join(root, '.chatbridge', 'request.txt');
+    const specFile = path.join(root, '.chatbridge', 'spec-input.json');
+    await writeFile(requestFile, localRequest);
+    await writeFile(specFile, JSON.stringify(localSpec(context)));
+    await expect(
+      cli(
+        'bind-task-spec',
+        '--task',
+        'demo',
+        '--request-file',
+        requestFile,
+        '--task-spec-file',
+        specFile,
+      ),
+    ).rejects.toMatchObject({ code: 'LOCAL_CONTRACT_MISSING' });
+    await expect(
+      readFile(path.join(root, '.chatbridge', 'runs', 'demo', 'local', 'task-spec.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 15_000);
   it('preserves dirty work and Git refs through multi-round capture, evidence and recovery', async () => {
     const head = await git('rev-parse', 'HEAD');
     const refs = await git('show-ref');

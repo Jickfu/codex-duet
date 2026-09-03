@@ -7,7 +7,16 @@ import { Command } from 'commander';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { registerLocalCommands } from '../../src/cli/local.js';
 import { localRequest, localSpec, rehashLocalSpec } from '../fixtures/local-task-spec.js';
-import { parseEnvelope } from '../../src/core/protocol.js';
+import { parseEnvelope, serializeEnvelope } from '../../src/core/protocol.js';
+import { canonicalJson, sha256 } from '../../src/duet/task-spec.js';
+import { TaskInteractionPolicyStore } from '../../src/duet/interaction-policy-store.js';
+import { CodexBrowserControlStore } from '../../src/duet/codex-browser-control-store.js';
+import { InteractionService } from '../../src/duet/interaction-service.js';
+import { DiscussionStore } from '../../src/duet/discussion-store.js';
+import { DuetRunStore } from '../../src/duet/run-store.js';
+import { TaskBrowserStore } from '../../src/browser/task-browser-store.js';
+import { ConversationBindingLock } from '../../src/browser/conversation-binding-lock.js';
+import { localTaskActivity } from '../../src/local/activity.js';
 
 const execute = promisify(execFile);
 let root: string;
@@ -55,6 +64,167 @@ beforeEach(async () => {
 });
 
 describe('LOCAL CLI data-plane integration', () => {
+  it('connects real Git lifecycle CLI with stored Discussion and Browser evidence', async () => {
+    const head = await git('rev-parse', 'HEAD');
+    await mkdir(path.join(root, 'docs', 'contracts'), { recursive: true });
+    for (const name of ['local-planner-v1.md', 'local-reviewer-v1.md'])
+      await writeFile(
+        path.join(root, 'docs', 'contracts', name),
+        await readFile(path.resolve('docs', 'contracts', name)),
+      );
+    const context = await cli('init-task', '--task', 'demo');
+    const spec = localSpec(context);
+    const stateRoot = path.join(root, '.chatbridge');
+    const requestFile = path.join(stateRoot, 'request.txt');
+    const specFile = path.join(stateRoot, 'spec.json');
+    await writeFile(requestFile, localRequest);
+    await writeFile(specFile, JSON.stringify(spec));
+    await cli(
+      'bind-task-spec',
+      '--task',
+      'demo',
+      '--request-file',
+      requestFile,
+      '--task-spec-file',
+      specFile,
+    );
+    const policy = {
+      version: 1 as const,
+      taskId: 'demo',
+      browserControlProvider: 'CODEX_BROWSER' as const,
+      discussion: { enabled: true },
+      selectedAt: new Date(0).toISOString(),
+    };
+    const policies = new TaskInteractionPolicyStore(stateRoot);
+    await policies.createOrVerify(policy);
+    await expect(cli('run-init', '--task', 'demo')).rejects.toMatchObject({
+      code: 'DISCUSSION_NOT_CONVERGED',
+    });
+    expect(await localTaskActivity(root, 'demo')).toBe('PLANNING');
+    const interaction = new InteractionService(
+      policies,
+      new CodexBrowserControlStore(stateRoot),
+      ['https://chatgpt.com'],
+      undefined,
+      {
+        taskBrowser: new TaskBrowserStore(stateRoot),
+        runs: new DuetRunStore(stateRoot),
+        lock: new ConversationBindingLock(stateRoot),
+        activity: { getState: (id) => localTaskActivity(root, id) },
+      },
+    );
+    const url = 'https://chatgpt.com/c/fixture';
+    const outbound = path.join(stateRoot, 'outbound.txt');
+    const inbound = path.join(stateRoot, 'inbound.txt');
+    const discussion = new DiscussionStore(stateRoot);
+    const control = {
+      version: 1 as const,
+      kind: 'DISCUSSION_CONTROL' as const,
+      taskId: 'demo',
+      iteration: 1,
+      round: 1,
+      provider: 'CODEX_BROWSER' as const,
+      taskSpecSha256: spec.integrity.sha256,
+      interactionPolicySha256: sha256(canonicalJson(policy)),
+      requestSha256: sha256('Discuss'),
+      content: 'Discuss',
+    };
+    const answer = {
+      version: 1 as const,
+      kind: 'DISCUSSION_RESPONSE' as const,
+      taskId: 'demo',
+      iteration: 1,
+      round: 1,
+      provider: 'CODEX_BROWSER' as const,
+      taskSpecSha256: spec.integrity.sha256,
+      controlSha256: sha256(canonicalJson(control)),
+      requestSha256: control.requestSha256,
+      outcome: 'CONVERGED' as const,
+      content: 'Agreed fixture',
+    };
+    await discussion.createControl(control);
+    await discussion.createResponse(answer);
+    await discussion.writeSummary({
+      version: 1,
+      taskId: 'demo',
+      provider: 'CODEX_BROWSER',
+      maxRounds: 3,
+      status: 'CONVERGED',
+      rounds: [
+        {
+          round: 1,
+          requestSha256: control.requestSha256,
+          responseSha256: sha256(canonicalJson(answer)),
+          outcome: 'CONVERGED',
+        },
+      ],
+    });
+    // A summary alone is not Browser response evidence.
+    await expect(cli('run-init', '--task', 'demo')).rejects.toThrow();
+    await writeFile(outbound, canonicalJson(control) + '\n');
+    await interaction.prepareCodexBrowser(
+      'demo',
+      outbound,
+      { kind: 'DISCUSSION', iteration: 1, round: 1 },
+      url,
+    );
+    await interaction.markCodexBrowserAttempted('demo');
+    await interaction.completeCodexBrowser('demo', 'CONFIRMED', url);
+    await writeFile(inbound, JSON.stringify(answer));
+    await interaction.recordCodexBrowserResponse('demo', inbound, url);
+    const run = await cli('run-init', '--task', 'demo');
+    expect(run.state).toBe('PLANNING');
+    async function exchange(
+      envelope: string,
+      kind: 'PLANNER' | 'REVIEWER',
+      state: 'PLAN' | 'DONE',
+    ) {
+      await writeFile(outbound, envelope);
+      const parsed = parseEnvelope(envelope);
+      await interaction.prepareCodexBrowser(
+        'demo',
+        outbound,
+        { kind, iteration: parsed.iteration },
+        url,
+      );
+      await expect(cli('confirm-control', '--task', 'demo')).rejects.toThrow();
+      await interaction.markCodexBrowserAttempted('demo');
+      await interaction.completeCodexBrowser('demo', 'CONFIRMED', url);
+      await cli('confirm-control', '--task', 'demo');
+      await writeFile(
+        inbound,
+        serializeEnvelope({
+          ...parsed,
+          state,
+          content: JSON.stringify({
+            identity: JSON.parse(parsed.content).identity,
+            result: 'Fixture result',
+          }),
+        }),
+      );
+      await expect(
+        cli('ingest-response', '--task', 'demo', '--message-file', inbound),
+      ).rejects.toThrow();
+      await interaction.recordCodexBrowserResponse('demo', inbound, url);
+      await cli('ingest-response', '--task', 'demo', '--message-file', inbound);
+      expect(
+        (await cli('ingest-response', '--task', 'demo', '--message-file', inbound)).disposition,
+      ).toBe('REPLAY');
+    }
+    await exchange(run.control, 'PLANNER', 'PLAN');
+    await cli('begin-execution', '--task', 'demo');
+    await writeFile(path.join(root, 'tracked.txt'), 'lifecycle change\n');
+    const candidate = await cli('capture', '--task', 'demo');
+    const evidence = await evidenceFile(candidate.snapshotId);
+    await cli('record-evidence', '--task', 'demo', '--evidence-file', evidence);
+    const prepared = await cli('run-prepare-review', '--task', 'demo');
+    expect(prepared.state).toBe('EXECUTED');
+    await exchange(prepared.control, 'REVIEWER', 'DONE');
+    expect((await cli('run-status', '--task', 'demo')).state).toBe('DONE');
+    expect(await localTaskActivity(root, 'demo')).toBe('DONE');
+    expect(await git('rev-parse', 'HEAD')).toBe(head);
+    expect(await git('remote')).toBe('');
+  }, 60_000);
   it('binds baseline contracts and projects immutable semantic identity without sending', async () => {
     await mkdir(path.join(root, 'docs', 'contracts'), { recursive: true });
     for (const name of ['local-planner-v1.md', 'local-reviewer-v1.md']) {

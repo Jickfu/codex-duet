@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { ChatbridgeError } from '../core/errors.js';
 import { ConversationUrlPolicy } from '../browser/conversation-url.js';
 import { ConversationReservationService } from '../browser/conversation-reservation.js';
+import type { TaskActivityResolver } from '../browser/conversation-reservation.js';
 import type { TaskBrowserStore } from '../browser/task-browser-store.js';
 import type { ConversationBindingLock } from '../browser/conversation-binding-lock.js';
 import type { DuetRunStore } from './run-store.js';
@@ -24,6 +25,7 @@ export class InteractionService {
       taskBrowser: TaskBrowserStore;
       runs: DuetRunStore;
       lock: ConversationBindingLock;
+      activity?: TaskActivityResolver;
     },
   ) {}
 
@@ -118,7 +120,9 @@ export class InteractionService {
       if (canonical && this.reservations) {
         const reservations = new ConversationReservationService(
           this.reservations.taskBrowser,
-          { getState: async (id) => (await this.reservations!.runs.read(id))?.state },
+          this.reservations!.activity ?? {
+            getState: async (id) => (await this.reservations!.runs.read(id))?.state,
+          },
           urls,
           this.codexBrowser,
         );
@@ -188,7 +192,9 @@ export class InteractionService {
       if (canonical && this.reservations) {
         const reservations = new ConversationReservationService(
           this.reservations.taskBrowser,
-          { getState: async (id) => (await this.reservations!.runs.read(id))?.state },
+          this.reservations!.activity ?? {
+            getState: async (id) => (await this.reservations!.runs.read(id))?.state,
+          },
           urls,
           this.codexBrowser,
         );

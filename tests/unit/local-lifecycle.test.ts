@@ -45,6 +45,7 @@ async function fixture(maxIterations = 3) {
     },
   };
   const gates = {
+    assertResponseReceived: vi.fn(async () => {}),
     assertPlanningReady: vi.fn(async () => {}),
     assertControlConfirmed: vi.fn(async () => {}),
   };
@@ -93,6 +94,12 @@ function response(run: LocalRunV1, state: 'PLAN' | 'DONE' | 'BLOCKED' = 'PLAN') 
   };
 }
 describe('LOCAL durable lifecycle', () => {
+  it('does not reuse a task ID owned by a GITHUB run', async () => {
+    const f = await fixture();
+    await f.init();
+    await writeFile(path.join(f.root, 'runs', 'demo.json'), '{}');
+    await expect(f.init()).rejects.toMatchObject({ code: 'LOCAL_TASK_MODE_CONFLICT' });
+  });
   it('runs two rounds through shared ingress, survives restart, and preserves exact replay', async () => {
     const f = await fixture();
     const initial = await f.init();

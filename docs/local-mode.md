@@ -35,7 +35,26 @@ chatbridge local project-control --task demo --review
 
 Bind before editing; the first projection produces Planner control. The `--review` form requires an already-prepared review target. Output is JSON with an `envelope` string, not a send operation. Oversize messages fail without truncation. TaskSpec binding, compact LOCAL projections and response-identity validation are implemented, but connecting them to the selected Browser provider, optional Discussion, full lifecycle crash/resume acceptance and M4 freeze remains pending.
 
-Snapshot-bound MCP tools expose allowed repository files read-only. LOCAL has separate Planner/Reviewer contracts resolved at baseline, without changing frozen M3.2c or GITHUB contracts. The [durable lifecycle core](adr/ADR-019-local-lifecycle-core.md) now reuses shared transitions and response ingress with separate LOCAL persistence. Its required transport/Discussion gate adapters and lifecycle CLI are not yet wired; end-to-end LOCAL task execution remains integration work.
+Snapshot-bound MCP tools expose allowed repository files read-only. LOCAL has separate Planner/Reviewer contracts resolved at baseline, without changing frozen M3.2c or GITHUB contracts. The [durable lifecycle core](adr/ADR-019-local-lifecycle-core.md) reuses shared transitions and response ingress with separate LOCAL persistence.
+
+### Guarded lifecycle CLI
+
+The [stored gates](adr/ADR-020-local-stored-gates.md) and lifecycle commands now support exact CODEX_BROWSER evidence:
+
+```text
+chatbridge local run-init --task demo
+chatbridge local run-status --task demo
+chatbridge local confirm-control --task demo
+chatbridge local ingest-response --task demo --message-file .chatbridge/response.txt
+chatbridge local begin-execution --task demo
+chatbridge local run-prepare-review --task demo
+```
+
+Persist an explicit interaction policy using the existing interaction-policy workflow before run-init. Enabled Discussion must already have complete, verified convergence evidence. The LOCAL Discussion producer CLI remains pending; a manually written CONVERGED summary cannot bypass the Browser artifact check.
+
+Use the existing Codex Browser interaction commands to prepare, attempt, confirm and receive the exact control/response bytes. `confirm-control` validates that evidence; it does not send. `ingest-response` requires the exact recorded Browser response. After PLAN is accepted, begin-execution records intent; the caller edits and tests, uses capture/record-evidence, then run-prepare-review persists EXECUTED. Confirm and receive the Reviewer exchange before ingesting the result.
+
+PLAYWRIGHT_CLI and new MCP-source lifecycle responses are explicitly refused until their exact-proof adapters are implemented. No automatic provider switch occurs. Real Browser E2E, blocked-resume/cancellation and final M4 acceptance remain pending.
 
 ## Target architecture
 

@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { registerLocalLifecycleCommands } from './local-lifecycle.js';
 import path from 'node:path';
 import type { Command } from 'commander';
 import { z } from 'zod';
@@ -27,7 +28,7 @@ const EvidenceInputSchema = z
   .strict();
 const IterationSchema = z.coerce.number().int().positive().safe();
 
-/** Additive data-plane commands; they do not authorize execution or accept reviewer responses. */
+/** Additive LOCAL data-plane and guarded lifecycle commands. */
 export function registerLocalCommands(
   program: Command,
   cwd: () => string = () => process.cwd(),
@@ -58,6 +59,7 @@ export function registerLocalCommands(
   const local = program
     .command('local')
     .description('LOCAL snapshot data plane (no commit, push or test execution)');
+  registerLocalLifecycleCommands(local, cwd, report);
   local
     .command('bind-task-spec')
     .description('Bind immutable LOCAL semantics before execution; no message send')

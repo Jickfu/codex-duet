@@ -1,5 +1,6 @@
 import path from 'node:path';
 import process from 'node:process';
+import { ChatbridgeError } from '../core/errors.js';
 import type { TestStatus } from '../core/domain.js';
 import { GitRunner } from '../github/git-runner.js';
 import { GitHubCodeProvider } from '../github/github-code-provider.js';
@@ -16,6 +17,7 @@ import { CodexBrowserControlStore } from '../duet/codex-browser-control-store.js
 import { InteractionService } from '../duet/interaction-service.js';
 import { DiscussionStore } from '../duet/discussion-store.js';
 import { DiscussionService } from '../duet/discussion-service.js';
+import { localTaskActivity } from '../local/activity.js';
 import { loadConfig } from '../config/config.js';
 import { TaskBrowserStore } from '../browser/task-browser-store.js';
 import { ConversationBindingLock } from '../browser/conversation-binding-lock.js';
@@ -64,6 +66,18 @@ function interactionServices() {
       {
         taskBrowser: new TaskBrowserStore(stateRoot),
         runs: new DuetRunStore(stateRoot),
+        activity: {
+          getState: async (id) => {
+            const github = await new DuetRunStore(stateRoot).read(id);
+            const local = await localTaskActivity(process.cwd(), id);
+            if (github && local)
+              throw new ChatbridgeError(
+                'Task ID has conflicting modes',
+                'LOCAL_TASK_MODE_CONFLICT',
+              );
+            return github?.state ?? local;
+          },
+        },
         lock: new ConversationBindingLock(stateRoot),
       },
     ),

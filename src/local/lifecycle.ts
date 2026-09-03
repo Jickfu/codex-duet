@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { TaskIdSchema } from '../core/domain.js';
@@ -60,6 +60,11 @@ export interface LocalLifecycleGates {
     taskId: string,
     controlSha256: string,
     policy: TaskInteractionPolicyV1,
+    identity: { kind: 'PLANNER' | 'REVIEWER'; iteration: number },
+  ): Promise<void>;
+  assertResponseReceived(
+    request: ResponseIngressRequest,
+    policy: TaskInteractionPolicyV1,
   ): Promise<void>;
 }
 
@@ -85,6 +90,15 @@ export class LocalLifecycle {
       throw new ChatbridgeError('Policy task mismatch', 'TASK_MISMATCH');
     z.number().int().min(1).max(100).parse(maxIterations);
     return this.lock.withLock(spec.taskId, async () => {
+      let githubExists = true;
+      try {
+        await access(path.join(this.root, 'runs', `${spec.taskId}.json`));
+      } catch (error: any) {
+        if (error?.code !== 'ENOENT') throw error;
+        githubExists = false;
+      }
+      if (githubExists)
+        throw new ChatbridgeError('Task ID already has a GITHUB run', 'LOCAL_TASK_MODE_CONFLICT');
       const existing = await this.readOptional(spec.taskId);
       if (existing) {
         if (
@@ -132,7 +146,10 @@ export class LocalLifecycle {
     return this.lock.withLock(taskId, async () => {
       const run = await this.status(taskId);
       if (!['PLANNING', 'EXECUTED', 'REVIEWING'].includes(run.state)) this.invalid();
-      await this.gates.assertControlConfirmed(taskId, sha256(run.control), run.policy);
+      await this.gates.assertControlConfirmed(taskId, sha256(run.control), run.policy, {
+        kind: run.state === 'PLANNING' ? 'PLANNER' : 'REVIEWER',
+        iteration: run.iteration,
+      });
       if (run.state === 'EXECUTED') {
         assertTransition(run.state, 'REVIEWING');
         run.state = 'REVIEWING';
@@ -210,6 +227,7 @@ export class LocalLifecycle {
       request.response,
       run.state === 'REVIEWING' ? run.reviews.at(-1) : undefined,
     );
+    await this.gates.assertResponseReceived(request, run.policy);
     if (envelope.state === 'PLAN') {
       if (envelope.iteration > run.maxIterations)
         throw new ChatbridgeError('LOCAL iteration limit reached', 'LOCAL_ITERATION_LIMIT');

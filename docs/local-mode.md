@@ -35,7 +35,7 @@ chatbridge local project-control --task demo --review
 
 Bind before editing; the first projection produces Planner control. The `--review` form requires an already-prepared review target. Output is JSON with an `envelope` string, not a send operation. Oversize messages fail without truncation. TaskSpec binding, compact LOCAL projections and response-identity validation are implemented, but connecting them to the selected Browser provider, optional Discussion, full lifecycle crash/resume acceptance and M4 freeze remains pending.
 
-Snapshot-bound MCP tools expose allowed repository files read-only. LOCAL has separate Planner/Reviewer contracts resolved at baseline, without changing frozen M3.2c or GITHUB contracts. End-to-end LOCAL task execution remains integration work.
+Snapshot-bound MCP tools expose allowed repository files read-only. LOCAL has separate Planner/Reviewer contracts resolved at baseline, without changing frozen M3.2c or GITHUB contracts. The [durable lifecycle core](adr/ADR-019-local-lifecycle-core.md) now reuses shared transitions and response ingress with separate LOCAL persistence. Its required transport/Discussion gate adapters and lifecycle CLI are not yet wired; end-to-end LOCAL task execution remains integration work.
 
 ## Target architecture
 

@@ -12,18 +12,25 @@ export function localGitEnvironment(): NodeJS.ProcessEnv {
   return { ...env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
 }
 
-export async function readLocalGit(
+type GitReadOptions = {
+  diff?: boolean;
+  acceptDifference?: boolean;
+  glob?: boolean;
+  maxBytes?: number;
+};
+
+export async function readLocalGitBytes(
   root: string,
   args: string[],
-  options: { diff?: boolean; acceptDifference?: boolean } = {},
-): Promise<string> {
+  options: GitReadOptions = {},
+): Promise<Buffer> {
   let stdout: Buffer;
   try {
     const result = await execute(
       'git',
       [
         '--no-pager',
-        '--literal-pathspecs',
+        options.glob ? '--glob-pathspecs' : '--literal-pathspecs',
         '-c',
         'core.fsmonitor=false',
         '-c',
@@ -35,9 +42,9 @@ export async function readLocalGit(
       {
         cwd: root,
         encoding: 'buffer',
-        maxBuffer: options.diff
-          ? LOCAL_LIMITS.materializedDiffBytes
-          : LOCAL_LIMITS.gitEnumerationBytes,
+        maxBuffer:
+          options.maxBytes ??
+          (options.diff ? LOCAL_LIMITS.materializedDiffBytes : LOCAL_LIMITS.gitEnumerationBytes),
         env: localGitEnvironment(),
       },
     );
@@ -49,6 +56,15 @@ export async function readLocalGit(
       stdout = error.stdout;
     else throw error;
   }
+  return stdout;
+}
+
+export async function readLocalGit(
+  root: string,
+  args: string[],
+  options: GitReadOptions = {},
+): Promise<string> {
+  const stdout = await readLocalGitBytes(root, args, options);
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(stdout);
   } catch {

@@ -1,6 +1,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { chmod, copyFile, mkdtemp, readFile, writeFile, unlink, symlink } from 'node:fs/promises';
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  writeFile,
+  unlink,
+  symlink,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,6 +35,66 @@ beforeEach(async () => {
 });
 
 describe('real LOCAL snapshot capture', () => {
+  it.each([false, true])(
+    'never leaks sensitive descendants across file/directory replacement (reverse=%s)',
+    async (reverse) => {
+      if (reverse) {
+        await mkdir(path.join(root, 'config'));
+        await writeFile(path.join(root, 'config', '.env'), 'SECRET=must-not-leak\n');
+        await git('add', '-f', 'config/.env');
+      } else {
+        await writeFile(path.join(root, 'config'), 'old configuration\n');
+        await git('add', 'config');
+      }
+      await git('commit', '-m', 'replacement baseline');
+      await git('rm', '-r', 'config');
+      if (reverse) {
+        await writeFile(path.join(root, 'config'), 'replacement\n');
+        await git('add', 'config');
+      } else {
+        await mkdir(path.join(root, 'config'));
+        await writeFile(path.join(root, 'config', '.env'), 'SECRET=must-not-leak\n');
+        await git('add', '-f', 'config/.env');
+      }
+      const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+      const snapshot = await authority.capture('demo');
+      const manifest = await authority.store.read('demo', snapshot.snapshotId);
+      const artifact = JSON.parse(
+        (await authority.store.readBlob(manifest.gitDiffBlobSha256)).toString(),
+      );
+      const patch = Buffer.from(artifact.contentBase64, 'base64').toString();
+      expect(patch).toContain('config');
+      expect(patch).not.toContain('.env');
+      expect(patch).not.toContain('must-not-leak');
+      expect(artifact.paths).not.toContain('config/.env');
+    },
+    30000,
+  );
+
+  it.each(['info', 'global', 'ignored-workspace'])(
+    'binds changed %s ignore policy before any newly hidden source exists',
+    async (kind) => {
+      let file = path.join(root, '.git', 'info', 'exclude');
+      if (kind === 'global') {
+        file = path.join(await mkdtemp(path.join(os.tmpdir(), 'global-ignore-')), 'rules');
+        await writeFile(file, '');
+        await git('config', 'core.excludesFile', file);
+      } else if (kind === 'ignored-workspace') {
+        await writeFile(path.join(root, '.gitignore'), 'nested/.gitignore\n');
+        await mkdir(path.join(root, 'nested'));
+        file = path.join(root, 'nested', '.gitignore');
+        await writeFile(file, '');
+      }
+      const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+      const baseline = await authority.capture('demo');
+      await writeFile(file, 'hidden.txt\n');
+      await expect(authority.assertLiveSnapshot(baseline.snapshotId)).rejects.toMatchObject({
+        code: 'LOCAL_BASELINE_DRIFT',
+      });
+    },
+    30000,
+  );
+
   it('ignores alternate Git environment repository and index selection', async () => {
     const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
     const expected = await authority.capture('demo');

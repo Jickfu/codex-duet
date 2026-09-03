@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { TaskIdSchema } from '../core/domain.js';
@@ -18,7 +17,9 @@ import {
 } from './snapshot-store.js';
 import { serializeLocalGitArtifact } from './workspace-service.js';
 import { createImmutableJson } from './immutable-json.js';
-import { readLocalGit } from './git-reader.js';
+import { readLocalGit, readLocalGitBytes } from './git-reader.js';
+import { capturedFileDiff, type CapturedFile } from './captured-diff.js';
+import { captureIgnorePolicy } from './ignore-policy.js';
 
 const IdentitySchema = z
   .object({
@@ -100,11 +101,11 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
   private async collect(): Promise<LocalSnapshotManifestV1> {
     const head = (await this.git(['rev-parse', '--verify', 'HEAD'])).trim();
     const branch = (await this.git(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    const ignorePolicy = await captureIgnorePolicy(this.root);
     // -v exposes assume-unchanged (lowercase) and skip-worktree (S). --sparse
     // preserves sparse-directory entries so unsupported semantics cannot be hidden.
     const rawIndex = await this.git(['ls-files', '--stage', '-v', '--sparse', '-z']);
     const index: string[] = [];
-    const indexedNames = new Set<string>();
     for (const entry of splitNul(rawIndex)) {
       const tab = entry.indexOf('\t');
       if (tab < 0) throw new ChatbridgeError('Unsupported index record', 'LOCAL_INDEX_INVALID');
@@ -117,7 +118,6 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
       if (isSensitiveWorkspacePath(name)) continue;
       validateWorkspaceRelativePath(name);
       index.push(entry);
-      indexedNames.add(name);
     }
     const names = [
       ...new Set(
@@ -128,7 +128,7 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
       .sort();
     if (names.length > LOCAL_LIMITS.files) throw limit();
     const entries: LocalSnapshotManifestV1['entries'] = [];
-    const additions: { name: string; bytes: Buffer; mode: number }[] = [];
+    const current = new Map<string, CapturedFile>();
     let totalBytes = 0;
     for (const name of names) {
       validateWorkspaceRelativePath(name);
@@ -169,7 +169,7 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
         bytes: bytes.length,
         blobSha256: await this.store.putBlob(bytes),
       });
-      if (!indexedNames.has(name)) additions.push({ name, bytes, mode: before.mode });
+      current.set(name, { bytes, executable: Boolean(before.mode & 0o111) });
     }
     const statusRecords = splitNul(
       await this.git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']),
@@ -181,66 +181,35 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
     const status = allowedStatus.join('\0');
     const diffParts: string[] = [];
     let diffBytes = 0;
-    const diffNames = [
-      ...new Set([
-        ...names,
-        ...splitNul(await this.git(['ls-tree', '-r', '--name-only', '-z', 'HEAD'])).filter(
-          (name) => !isSensitiveWorkspacePath(name),
-        ),
-      ]),
-    ].sort();
+    const originals = new Map<string, { mode: string; oid: string }>();
+    for (const record of splitNul(await this.git(['ls-tree', '-r', '-z', head]))) {
+      const tab = record.indexOf('\t');
+      const name = record.slice(tab + 1);
+      if (isSensitiveWorkspacePath(name)) continue;
+      const match = /^(100644|100755) blob ([a-f0-9]{40})$/.exec(record.slice(0, tab));
+      if (!match) throw new ChatbridgeError('Unsupported HEAD entry', 'LOCAL_INDEX_UNSUPPORTED');
+      validateWorkspaceRelativePath(name);
+      originals.set(name, { mode: match[1]!, oid: match[2]! });
+    }
+    const diffNames = [...new Set([...current.keys(), ...originals.keys()])].sort();
+    if (diffNames.length > LOCAL_LIMITS.files) throw limit();
     for (const name of diffNames) validateWorkspaceRelativePath(name);
-    // Small literal path groups avoid platform command-line limits and exclude credential paths.
-    for (let offset = 0; offset < diffNames.length; offset += 20) {
-      const diff = await this.git(
-        [
-          'diff',
-          '--no-ext-diff',
-          '--no-textconv',
-          '--no-renames',
-          '--binary',
-          'HEAD',
-          '--',
-          ...diffNames.slice(offset, offset + 20),
-        ],
-        true,
-      );
+    let headBytes = 0;
+    for (const name of diffNames) {
+      const original = originals.get(name);
+      let before: CapturedFile | undefined;
+      if (original) {
+        const bytes = await readLocalGitBytes(this.root, ['cat-file', 'blob', original.oid], {
+          maxBytes: LOCAL_LIMITS.singleFileBytes,
+        });
+        headBytes += bytes.length;
+        if (headBytes > LOCAL_LIMITS.capturedBytes) throw limit();
+        before = { bytes, executable: original.mode === '100755' };
+      }
+      const diff = await capturedFileDiff(name, before, current.get(name));
       diffBytes += Buffer.byteLength(diff);
       if (diffBytes > LOCAL_LIMITS.materializedDiffBytes) throw limit();
       diffParts.push(diff);
-    }
-    // Render additions from captured bytes, not from the mutable live worktree.
-    // Git's binary patch handles arbitrary bytes and records executable mode.
-    for (const addition of additions) {
-      const temporary = await mkdtemp(path.join(os.tmpdir(), 'chatbridge-addition-'));
-      try {
-        const file = path.join(temporary, addition.name);
-        await mkdir(path.dirname(file), { recursive: true });
-        await writeFile(file, addition.bytes);
-        await chmod(file, addition.mode & 0o111 ? 0o755 : 0o644);
-        const diff = await readLocalGit(
-          temporary,
-          [
-            'diff',
-            '--no-index',
-            '--no-ext-diff',
-            '--no-textconv',
-            '--no-renames',
-            '--binary',
-            '--src-prefix=a/',
-            '--dst-prefix=b/',
-            '--',
-            '/dev/null',
-            addition.name,
-          ],
-          { diff: true, acceptDifference: true },
-        );
-        diffBytes += Buffer.byteLength(diff);
-        if (diffBytes > LOCAL_LIMITS.materializedDiffBytes) throw limit();
-        diffParts.push(diff);
-      } finally {
-        await rm(temporary, { recursive: true, force: true });
-      }
     }
     const statusHash = await this.store.putBlob(
       serializeLocalGitArtifact({
@@ -266,7 +235,7 @@ export class GitLocalSnapshotAuthority implements LocalSnapshotAuthority {
         head,
         ...(branch === 'HEAD' ? {} : { branch }),
         detached: branch === 'HEAD',
-        indexManifestSha256: sha256(canonicalJson(index)),
+        indexManifestSha256: sha256(canonicalJson({ index, ignorePolicy })),
         statusSha256: sha256(status),
       },
       surface: {

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { TaskIdSchema } from '../core/domain.js';
 import { ChatbridgeError } from '../core/errors.js';
-import { StateSchema } from '../core/protocol.js';
+import { StateSchema, parseEnvelope } from '../core/protocol.js';
 import { assertTransition } from '../core/state-machine.js';
 import { TaskOperationLock } from '../duet/task-operation-lock.js';
 import { ResponseIngressService, type ResponseIngressRequest } from '../duet/response-ingress.js';
@@ -21,6 +21,13 @@ import {
 import { localControlEnvelope, validateLocalControlResponse } from './control-projection.js';
 import { LocalTaskSpecV1Schema, validateLocalTaskSpec, type LocalTaskSpecV1 } from './task-spec.js';
 import type { LocalCodeProvider, LocalSnapshotAuthority } from './local-code-provider.js';
+import {
+  LocalDecisionInputSchema,
+  LocalUserDecisionV1Schema,
+  decisionFingerprint,
+  validateDecision,
+  type LocalDecisionInput,
+} from './user-decision.js';
 
 const RunSchema = z
   .object({
@@ -34,6 +41,7 @@ const RunSchema = z
     maxIterations: z.number().int().min(1).max(100),
     control: z.string(),
     confirmed: z.boolean(),
+    decisions: z.array(LocalUserDecisionV1Schema).max(100).optional(),
     cancellation: z
       .object({
         fromState: StateSchema,
@@ -251,6 +259,59 @@ export class LocalLifecycle {
     });
   }
 
+  /** Explicit user clarification only; never changes TaskSpec or grants execution. */
+  async resumeBlocked(taskId: string, input: LocalDecisionInput) {
+    const request = LocalDecisionInputSchema.parse(input);
+    return this.lock.withLock(taskId, async () => {
+      const run = await this.status(taskId);
+      const previous = run.decisions?.find(
+        (d) => d.blockedControlSha256 === request.blockedControlSha256,
+      );
+      if (previous) {
+        if (previous.decision !== request.decision) this.invalid();
+        return run; // Exact historical retry never consumes a later BLOCKED or revives cancellation.
+      }
+      if (run.state !== 'BLOCKED' || sha256(run.control) !== request.blockedControlSha256)
+        this.invalid();
+      const blocked = run.responses.at(-1);
+      if (!blocked || blocked.controlSha256 !== request.blockedControlSha256) this.invalid();
+      const iteration = run.reviews.length + 1;
+      if (iteration > run.maxIterations)
+        throw new ChatbridgeError('LOCAL iteration limit reached', 'LOCAL_ITERATION_LIMIT');
+      const content = {
+        version: 1 as const,
+        taskId,
+        taskSpecSha256: run.spec.integrity.sha256,
+        ...request,
+        blockedResponseSha256: blocked.responseSha256,
+        blockedResult: JSON.parse(parseEnvelope(blocked.response).content).result as string,
+        sequence: (run.decisions?.length ?? 0) + 1,
+        iteration,
+        planningSnapshotId:
+          run.reviews.at(-1)?.reviewSnapshotId ?? run.spec.context.baselineSnapshotId,
+        ...(run.decisions?.length
+          ? { previousDecisionSha256: run.decisions.at(-1)!.decisionSha256 }
+          : {}),
+        recordedAt: new Date().toISOString(),
+      };
+      const decision = validateDecision({
+        ...content,
+        decisionSha256: decisionFingerprint(content),
+      });
+      const decisions = [...(run.decisions ?? []), decision];
+      const control = localControlEnvelope(run.spec, undefined, decisions);
+      await this.snapshots.assertLiveSnapshot(decision.planningSnapshotId);
+      assertTransition(run.state, 'PLANNING');
+      run.decisions = decisions;
+      run.control = control;
+      run.state = 'PLANNING';
+      run.iteration = iteration;
+      run.confirmed = false;
+      await this.write(run);
+      return run;
+    });
+  }
+
   async prepareReview(taskId: string) {
     return this.lock.withLock(taskId, async () => {
       const run = await this.status(taskId);
@@ -262,7 +323,7 @@ export class LocalLifecycle {
       if (run.state !== 'EXECUTING') this.invalid();
       // Provider publication may precede this write on crash. Its immutable replay completes recovery.
       const target = await this.provider.prepareReview({ taskId, iteration: run.iteration });
-      const control = localControlEnvelope(run.spec, target);
+      const control = localControlEnvelope(run.spec, target, run.decisions);
       assertTransition(run.state, 'EXECUTED');
       run.state = 'EXECUTED';
       run.control = control;
@@ -302,6 +363,7 @@ export class LocalLifecycle {
       run.spec,
       request.response,
       run.state === 'REVIEWING' ? run.reviews.at(-1) : undefined,
+      run.decisions,
     );
     await this.gates.assertResponseReceived(request, run.policy);
     if (envelope.state === 'PLAN') {
@@ -364,49 +426,83 @@ export class LocalLifecycle {
       new Set(run.responses.map((response) => response.controlSha256)).size !== run.responses.length
     )
       this.invalid();
-    let lastState: string | undefined;
+    let phase: string = 'PLANNING';
     let lastPlan: string | undefined;
-    let lastIteration = 1;
-    run.responses.forEach((record, index) => {
-      const target = index ? run.reviews[index - 1] : undefined;
+    let iteration = 1;
+    let reviewCount = 0;
+    let decisionCount = 0;
+    let control = localControlEnvelope(run.spec);
+    let previousResponse: LocalRunV1['responses'][number] | undefined;
+    const decisions = run.decisions ?? [];
+    const advanceDecision = () => {
+      const decision = decisions[decisionCount];
+      if (!decision || phase !== 'BLOCKED') return;
+      validateDecision(decision);
       if (
-        (index && (!target || lastState !== 'PLAN')) ||
-        record.controlSha256 !== sha256(localControlEnvelope(run.spec, target)) ||
-        record.iteration !== (target?.iteration ?? 1) ||
+        decision.taskId !== taskId ||
+        decision.taskSpecSha256 !== run.spec.integrity.sha256 ||
+        decision.sequence !== decisionCount + 1 ||
+        decision.previousDecisionSha256 !== decisions[decisionCount - 1]?.decisionSha256 ||
+        decision.blockedControlSha256 !== sha256(control) ||
+        decision.blockedResponseSha256 !== previousResponse?.responseSha256 ||
+        decision.blockedResult !==
+          JSON.parse(parseEnvelope(previousResponse!.response).content).result ||
+        decision.iteration !== reviewCount + 1 ||
+        decision.planningSnapshotId !==
+          (run.reviews[reviewCount - 1]?.reviewSnapshotId ?? run.spec.context.baselineSnapshotId)
+      )
+        this.invalid();
+      decisionCount++;
+      phase = 'PLANNING';
+      iteration = decision.iteration;
+      control = localControlEnvelope(run.spec, undefined, decisions.slice(0, decisionCount));
+    };
+    const advanceReview = () => {
+      const target = run.reviews[reviewCount];
+      if (phase !== 'PLAN' || !target || target.iteration !== iteration) this.invalid();
+      reviewCount++;
+      phase = 'REVIEWING';
+      control = localControlEnvelope(run.spec, target, decisions.slice(0, decisionCount));
+    };
+    run.responses.forEach((record) => {
+      advanceDecision();
+      if (phase === 'PLAN') advanceReview();
+      const target = phase === 'REVIEWING' ? run.reviews[reviewCount - 1] : undefined;
+      if (
+        !['PLANNING', 'REVIEWING'].includes(phase) ||
+        record.controlSha256 !== sha256(control) ||
+        record.iteration !== iteration ||
         record.responseSha256 !== sha256(record.response)
       )
         this.invalid();
-      const envelope = validateLocalControlResponse(run.spec, record.response, target);
-      lastState = envelope.state;
-      lastIteration = envelope.iteration;
+      const envelope = validateLocalControlResponse(
+        run.spec,
+        record.response,
+        target,
+        decisions.slice(0, decisionCount),
+      );
+      phase = envelope.state;
+      iteration = envelope.iteration;
       if (envelope.state === 'PLAN') lastPlan = record.response;
+      previousResponse = record;
     });
-    if (run.plan !== lastPlan || run.iteration !== lastIteration) this.invalid();
-    if (!lastState && run.state !== 'PLANNING') this.invalid();
+    advanceDecision();
+    if (phase === 'PLAN' && reviewCount < run.reviews.length) advanceReview();
     if (
-      lastState &&
-      (lastState === 'PLAN'
-        ? !['PLAN', 'EXECUTING', 'EXECUTED', 'REVIEWING'].includes(run.state)
-        : run.state !== lastState)
-    )
-      this.invalid();
-    if (run.control !== localControlEnvelope(run.spec, run.reviews.at(-1))) this.invalid();
-    if (['PLAN', 'EXECUTING', 'EXECUTED', 'REVIEWING', 'DONE'].includes(run.state) && !run.plan)
-      this.invalid();
-    if (
-      ['EXECUTED', 'REVIEWING', 'DONE'].includes(run.state) &&
-      run.reviews.length !== run.iteration
-    )
-      this.invalid();
-    if (['PLAN', 'EXECUTING'].includes(run.state) && run.reviews.length !== run.iteration - 1)
-      this.invalid();
-    if (
-      run.state === 'PLANNING' &&
-      (run.iteration !== 1 || run.reviews.length || run.responses.length)
+      decisionCount !== decisions.length ||
+      reviewCount !== run.reviews.length ||
+      run.plan !== lastPlan ||
+      run.iteration !== iteration ||
+      run.control !== control ||
+      (phase === 'PLAN'
+        ? !['PLAN', 'EXECUTING'].includes(run.state)
+        : phase === 'REVIEWING'
+          ? !['EXECUTED', 'REVIEWING'].includes(run.state)
+          : run.state !== phase)
     )
       this.invalid();
     if (run.state === 'EXECUTED' && run.confirmed) this.invalid();
-    if (['REVIEWING', 'DONE'].includes(run.state) && !run.confirmed) this.invalid();
+    if (run.state !== 'PLANNING' && run.state !== 'EXECUTED' && !run.confirmed) this.invalid();
     return run;
   }
 

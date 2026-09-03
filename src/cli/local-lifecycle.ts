@@ -126,6 +126,36 @@ export function registerLocalLifecycleCommands(
       report(await lifecycle.cancel(taskId, o.reason));
     });
   local
+    .command('resume-blocked')
+    .description(
+      'Append an explicit in-scope user decision and prepare a new Planner control; never sends',
+    )
+    .requiredOption('--task <id>')
+    .requiredOption('--blocked-control-sha256 <sha256>')
+    .requiredOption('--decision-file <path>')
+    .requiredOption(
+      '--scope-unchanged',
+      'assert that the user decision does not alter TaskSpec scope or requirements',
+    )
+    .action(
+      async (o: {
+        task: string;
+        blockedControlSha256: string;
+        decisionFile: string;
+        scopeUnchanged: true;
+      }) => {
+        const decision = await readFile(path.resolve(cwd(), o.decisionFile), 'utf8');
+        const { taskId, lifecycle } = await runtime(o.task);
+        report(
+          await lifecycle.resumeBlocked(taskId, {
+            blockedControlSha256: o.blockedControlSha256,
+            decision,
+            scopeUnchanged: o.scopeUnchanged,
+          }),
+        );
+      },
+    );
+  local
     .command('ingest-response')
     .description('Accept exact recorded Browser response through guarded shared ingress')
     .requiredOption('--task <id>')

@@ -35,6 +35,8 @@ chatbridge local project-control --task demo --review
 
 Bind before editing; the first projection produces Planner control. The `--review` form requires an already-prepared review target. Output is JSON with an `envelope` string, not a send operation. Oversize messages fail without truncation. TaskSpec binding, compact LOCAL projections and response-identity validation are implemented, but connecting them to the selected Browser provider, optional Discussion, full lifecycle crash/resume acceptance and M4 freeze remains pending.
 
+After run-init, `project-control` is refused: use the exact `control` from run-status or a lifecycle command, including all accepted user decisions.
+
 Snapshot-bound MCP tools expose allowed repository files read-only. LOCAL has separate Planner/Reviewer contracts resolved at baseline, without changing frozen M3.2c or GITHUB contracts. The [durable lifecycle core](adr/ADR-019-local-lifecycle-core.md) reuses shared transitions and response ingress with separate LOCAL persistence.
 
 ### Guarded lifecycle CLI
@@ -70,7 +72,15 @@ Use the existing Codex Browser interaction commands to prepare, attempt, confirm
 
 `chatbridge local run-cancel --task demo --reason "operator stop"` durably terminates a cancellable run without reverting code or retracting transport operations. Repeating the same reason is idempotent. Historical response replay cannot revive cancellation. See [ADR-022](adr/ADR-022-local-reconciliation-cancellation.md).
 
-PLAYWRIGHT_CLI and new MCP-source lifecycle responses are explicitly refused until their exact-proof adapters are implemented. No automatic provider switch occurs. Real Browser E2E, blocked-resume and final M4 acceptance remain pending.
+For a lifecycle BLOCKED response, obtain the user's in-scope clarification and save its exact text outside the reviewable surface:
+
+```text
+chatbridge local resume-blocked --task demo --blocked-control-sha256 <blocked-control-sha256> --decision-file .chatbridge/decision.txt --scope-unchanged
+```
+
+This appends a bound decision and returns PLANNING with a new control, not execution permission. Send, confirm and receive through the selected Browser workflow and accept a fresh PLAN before beginning execution. Reviewer blocking at N resumes planning for N+1 against the reviewed snapshot. The original TaskSpec is unchanged; scope or requirement changes require a new task. Exact retries preserve the decision and never consume a later block. See [ADR-023](adr/ADR-023-local-blocked-user-decisions.md). Pre-run Discussion blocking is not handled by this lifecycle command.
+
+PLAYWRIGHT_CLI and new MCP-source lifecycle responses are explicitly refused until their exact-proof adapters are implemented. No automatic provider switch occurs. Real Browser E2E and final M4 acceptance remain pending.
 
 ## Target architecture
 

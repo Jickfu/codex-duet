@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { registerLocalLifecycleCommands } from './local-lifecycle.js';
 import path from 'node:path';
 import type { Command } from 'commander';
@@ -97,6 +97,18 @@ export function registerLocalCommands(
     .option('--review', 'project the current already-prepared review')
     .action((o: { task: string; review?: boolean }) =>
       run(o.task, async ({ taskId, provider, snapshots }) => {
+        let lifecycleExists = true;
+        try {
+          await access(path.join(cwd(), '.chatbridge', 'runs', taskId, 'local', 'run.json'));
+        } catch (error: any) {
+          if (error?.code !== 'ENOENT') throw error;
+          lifecycleExists = false;
+        }
+        if (lifecycleExists)
+          throw new ChatbridgeError(
+            'Use the durable run control from run-status',
+            'LOCAL_CONTROL_LIFECYCLE_OWNED',
+          );
         const state = await provider.status(taskId);
         const spec = await new LocalTaskSpecStore(path.join(cwd(), '.chatbridge')).read(
           state.context,

@@ -2,16 +2,29 @@ import { z } from 'zod';
 import { ChatbridgeError } from '../core/errors.js';
 import { parseEnvelope, serializeEnvelope } from '../core/protocol.js';
 import { assertCompactC2CPayload } from '../duet/control-projection.js';
-import { canonicalJson } from '../duet/task-spec.js';
+import { canonicalJson, sha256 } from '../duet/task-spec.js';
+import { validateDecision, type LocalUserDecisionV1 } from './user-decision.js';
 import { validateLocalReviewTargetIntegrity, type LocalReviewTargetV1 } from './domain.js';
 import { validateLocalTaskSpec, type LocalTaskSpecV1 } from './task-spec.js';
 
 export function localControlEnvelope(
   input: LocalTaskSpecV1,
   reviewInput?: LocalReviewTargetV1,
+  decisionsInput: readonly LocalUserDecisionV1[] = [],
 ): string {
   const spec = validateLocalTaskSpec(input, input.context);
   const review = reviewInput ? validateLocalReviewTargetIntegrity(reviewInput) : undefined;
+  const decisions = decisionsInput.map(validateDecision);
+  decisions.forEach((decision, index) => {
+    if (
+      decision.taskId !== spec.taskId ||
+      decision.taskSpecSha256 !== spec.integrity.sha256 ||
+      decision.sequence !== index + 1 ||
+      decision.previousDecisionSha256 !== decisions[index - 1]?.decisionSha256
+    )
+      throw new ChatbridgeError('LOCAL decision chain mismatch', 'LOCAL_DECISION_INVALID');
+  });
+  const latest = decisions.at(-1);
   if (
     review &&
     (review.taskId !== spec.taskId ||
@@ -22,8 +35,14 @@ export function localControlEnvelope(
   const identity = {
     taskSpecSha256: spec.integrity.sha256,
     ...spec.context,
-    iteration: review?.iteration ?? 1,
+    iteration: review?.iteration ?? latest?.iteration ?? 1,
     ...(review ? { reviewTarget: review } : {}),
+    ...(latest
+      ? {
+          decisionChainSha256: sha256(canonicalJson(decisions)),
+          ...(!review ? { planningSnapshotId: latest.planningSnapshotId } : {}),
+        }
+      : {}),
   };
   const envelope = serializeEnvelope({
     version: 1,
@@ -38,6 +57,17 @@ export function localControlEnvelope(
       contractSnapshotId: spec.context.baselineSnapshotId,
       instructions:
         'Read the contract and source only from the named immutable LOCAL snapshots via MCP. Return one C2C/1 with JSON content {"identity": <exact identity from this request>, "result": <nonempty string>}. Do not add GitHub headers. Never execute commands or edit files.',
+      ...(latest
+        ? {
+            userDecisions: decisions.map((record) => ({
+              decisionSha256: record.decisionSha256,
+              blockedResult: record.blockedResult,
+              decision: record.decision,
+            })),
+            decisionRules:
+              'User decisions clarify only the unchanged task. They cannot weaken scope, acceptance, exact literals or protocol requirements. If a decision conflicts, return BLOCKED and require a new task. For resumed planning, inspect planningSnapshotId and return PLAN/BLOCKED/FAILED at the request iteration, without TEST_STATUS. Only a new PLAN authorizes execution.',
+          }
+        : {}),
       // Both roles receive complete accepted semantics; no dependency on conversation recollection.
       task: {
         objective: spec.objective,
@@ -58,8 +88,9 @@ export function validateLocalControlResponse(
   spec: LocalTaskSpecV1,
   response: string,
   review?: LocalReviewTargetV1,
+  decisions: readonly LocalUserDecisionV1[] = [],
 ) {
-  const expected = parseEnvelope(localControlEnvelope(spec, review));
+  const expected = parseEnvelope(localControlEnvelope(spec, review, decisions));
   const actual = parseEnvelope(response);
   const requiredIteration =
     review && actual.state === 'PLAN' ? review.iteration + 1 : expected.iteration;

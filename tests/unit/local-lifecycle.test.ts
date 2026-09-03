@@ -7,6 +7,7 @@ import { sha256 } from '../../src/duet/task-spec.js';
 import { LocalLifecycle, type LocalRunV1 } from '../../src/local/lifecycle.js';
 import { localReviewTargetFingerprint, type LocalReviewTargetV1 } from '../../src/local/domain.js';
 import { localSpec } from '../fixtures/local-task-spec.js';
+import { decisionFingerprint } from '../../src/local/user-decision.js';
 
 async function fixture(maxIterations = 3) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'local-run-'));
@@ -105,6 +106,175 @@ function response(run: LocalRunV1, state: 'PLAN' | 'DONE' | 'BLOCKED' = 'PLAN') 
   };
 }
 describe('LOCAL durable lifecycle', () => {
+  it('appends repeated Planner decisions without overwriting blocked replies or authorizing execution', async () => {
+    const f = await fixture();
+    let run = await f.init();
+    const originalSpec = run.spec;
+    const requests = [];
+    for (const decision of ['Keep the required behavior.\n', 'Use the existing in-scope option.']) {
+      await f.service.confirmControl('demo');
+      const blocked = response(run, 'BLOCKED');
+      await f.service.ingest(blocked);
+      if (requests.length) {
+        expect((await f.create().resumeBlocked('demo', requests[0]!)).state).toBe('BLOCKED');
+        expect((await f.create().status('demo')).decisions).toHaveLength(1);
+      }
+      const input = {
+        blockedControlSha256: sha256(run.control),
+        decision,
+        scopeUnchanged: true as const,
+      };
+      requests.push(input);
+      run = await f.create().resumeBlocked('demo', input);
+      expect(run.state).toBe('PLANNING');
+      expect(run.confirmed).toBe(false);
+      expect(run.iteration).toBe(1);
+      expect(run.spec).toEqual(originalSpec);
+      expect(run.responses.at(-1)?.response).toBe(blocked.response);
+      expect(run.decisions?.at(-1)?.decision).toBe(decision);
+      expect(run.decisions?.at(-1)?.blockedResult).toBe('fixture result');
+      expect(sha256(run.control)).not.toBe(input.blockedControlSha256);
+      const bytes = await readFile(f.file, 'utf8');
+      expect(await f.create().resumeBlocked('demo', input)).toEqual(run);
+      expect(await readFile(f.file, 'utf8')).toBe(bytes);
+      expect((await f.create().ingest(blocked)).disposition).toBe('REPLAY');
+      await expect(f.service.ingest(response(run))).rejects.toThrow();
+      await expect(f.service.beginExecution('demo')).rejects.toThrow();
+      await expect(
+        f.service.resumeBlocked('demo', { ...input, decision: 'replacement' }),
+      ).rejects.toThrow();
+    }
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(run));
+    await f.service.beginExecution('demo');
+    const review = await f.service.prepareReview('demo');
+    expect(JSON.parse(parseEnvelope(review.control).content).userDecisions).toHaveLength(2);
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(review, 'DONE'));
+    expect((await f.create().resumeBlocked('demo', requests[0]!)).state).toBe('DONE');
+  });
+
+  it('replans after Reviewer BLOCKED at N+1 against the reviewed snapshot and retains the review chain', async () => {
+    const f = await fixture();
+    const initial = await f.init();
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(initial));
+    await f.service.beginExecution('demo');
+    f.setLive('c'.repeat(64));
+    const reviewed = await f.service.prepareReview('demo');
+    await f.service.confirmControl('demo');
+    const blocked = response(reviewed, 'BLOCKED');
+    await f.service.ingest(blocked);
+    const input = {
+      blockedControlSha256: sha256(reviewed.control),
+      decision: 'Retain all existing requirements.',
+      scopeUnchanged: true as const,
+    };
+    const resumed = await f.create().resumeBlocked('demo', input);
+    const envelope = parseEnvelope(resumed.control);
+    expect(envelope.iteration).toBe(2);
+    expect(envelope.testStatus).toBeUndefined();
+    expect(JSON.parse(envelope.content).identity.planningSnapshotId).toBe('c'.repeat(64));
+    expect(resumed.reviews).toEqual(reviewed.reviews);
+    await f.service.confirmControl('demo');
+    await expect(f.service.ingest(response(resumed, 'DONE'))).rejects.toThrow();
+    const wrongIdentity = parseEnvelope(response(resumed).response);
+    const content = JSON.parse(wrongIdentity.content);
+    delete content.identity.decisionChainSha256;
+    await expect(
+      f.service.ingest({
+        ...response(resumed),
+        response: serializeEnvelope({ ...wrongIdentity, content: JSON.stringify(content) }),
+      }),
+    ).rejects.toThrow();
+    f.setLive('d'.repeat(64));
+    await expect(f.service.ingest(response(resumed))).rejects.toThrow('drift');
+    f.setLive('c'.repeat(64));
+    await f.service.ingest(response(resumed));
+    await f.service.beginExecution('demo');
+    f.setLive('d'.repeat(64));
+    const second = await f.service.prepareReview('demo');
+    expect(second.reviews[1]?.previousReviewSnapshotId).toBe('c'.repeat(64));
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(second, 'DONE'));
+    expect((await f.create().status('demo')).state).toBe('DONE');
+  });
+
+  it('rejects scope changes, stale controls, overflow and drift before decision publication', async () => {
+    const f = await fixture();
+    const initial = await f.init();
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(initial, 'BLOCKED'));
+    const input = {
+      blockedControlSha256: sha256(initial.control),
+      decision: 'clarification',
+      scopeUnchanged: true as const,
+    };
+    const bytes = await readFile(f.file, 'utf8');
+    await expect(
+      f.service.resumeBlocked('demo', { ...input, scopeUnchanged: false } as never),
+    ).rejects.toThrow();
+    await expect(
+      f.service.resumeBlocked('demo', { ...input, blockedControlSha256: 'f'.repeat(64) }),
+    ).rejects.toThrow();
+    await expect(f.service.resumeBlocked('demo', { ...input, decision: ' ' })).rejects.toThrow();
+    await expect(
+      f.service.resumeBlocked('demo', { ...input, decision: '界'.repeat(4000) }),
+    ).rejects.toMatchObject({ code: 'C2C_PAYLOAD_TOO_LARGE' });
+    f.setLive('f'.repeat(64));
+    await expect(f.service.resumeBlocked('demo', input)).rejects.toThrow('drift');
+    expect(await readFile(f.file, 'utf8')).toBe(bytes);
+    await f.service.cancel('demo', 'stop');
+    await expect(f.service.resumeBlocked('demo', input)).rejects.toThrow();
+  });
+
+  it('refuses Reviewer resumption beyond the execution iteration limit', async () => {
+    const f = await fixture(1);
+    const initial = await f.init();
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(initial));
+    await f.service.beginExecution('demo');
+    const review = await f.service.prepareReview('demo');
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(review, 'BLOCKED'));
+    await expect(
+      f.service.resumeBlocked('demo', {
+        blockedControlSha256: sha256(review.control),
+        decision: 'clarification',
+        scopeUnchanged: true,
+      }),
+    ).rejects.toMatchObject({ code: 'LOCAL_ITERATION_LIMIT' });
+  });
+
+  it('validates decision provenance even after cancellation', async () => {
+    const f = await fixture();
+    const initial = await f.init();
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(initial, 'BLOCKED'));
+    await f.service.resumeBlocked('demo', {
+      blockedControlSha256: sha256(initial.control),
+      decision: 'clarification',
+      scopeUnchanged: true,
+    });
+    const cancelled = await f.service.cancel('demo', 'stop');
+    expect((await f.create().status('demo')).state).toBe('CANCELLED');
+    const original = cancelled.decisions![0]!;
+    for (const changes of [
+      { decision: 'tampered' },
+      { blockedResponseSha256: 'f'.repeat(64) },
+      { iteration: 2 },
+      { planningSnapshotId: 'f'.repeat(64) },
+    ]) {
+      const altered = { ...original, ...changes };
+      if (!('decision' in changes)) {
+        const { decisionSha256, ...content } = altered;
+        expect(decisionSha256).toBe(original.decisionSha256);
+        altered.decisionSha256 = decisionFingerprint(content);
+      }
+      await writeFile(f.file, JSON.stringify({ ...cancelled, decisions: [altered] }));
+      await expect(f.create().status('demo')).rejects.toThrow();
+    }
+  });
   it('observes execution and a publication crash without advancing or recreating review', async () => {
     const f = await fixture();
     const initial = await f.init();

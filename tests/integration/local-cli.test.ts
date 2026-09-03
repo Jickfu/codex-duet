@@ -183,7 +183,7 @@ describe('LOCAL CLI data-plane integration', () => {
     async function exchange(
       envelope: string,
       kind: 'PLANNER' | 'REVIEWER',
-      state: 'PLAN' | 'DONE',
+      state: 'PLAN' | 'DONE' | 'BLOCKED',
     ) {
       await writeFile(outbound, envelope);
       const parsed = parseEnvelope(envelope);
@@ -217,7 +217,29 @@ describe('LOCAL CLI data-plane integration', () => {
         (await cli('ingest-response', '--task', 'demo', '--message-file', inbound)).disposition,
       ).toBe('REPLAY');
     }
-    await exchange(run.control, 'PLANNER', 'PLAN');
+    await exchange(run.control, 'PLANNER', 'BLOCKED');
+    const decisionFile = path.join(stateRoot, 'decision.txt');
+    await writeFile(decisionFile, 'Keep the accepted task scope and requirements.\n');
+    async function resume(controlBytes: string) {
+      const args = [
+        'resume-blocked',
+        '--task',
+        'demo',
+        '--blocked-control-sha256',
+        sha256(controlBytes),
+        '--decision-file',
+        decisionFile,
+        '--scope-unchanged',
+      ];
+      const resumed = await cli(...args);
+      expect(await cli(...args)).toEqual(resumed);
+      expect(resumed.state).toBe('PLANNING');
+      await expect(cli('begin-execution', '--task', 'demo')).rejects.toThrow();
+      await expect(cli('project-control', '--task', 'demo')).rejects.toThrow();
+      return resumed;
+    }
+    const replanned = await resume(run.control);
+    await exchange(replanned.control, 'PLANNER', 'PLAN');
     await cli('begin-execution', '--task', 'demo');
     expect((await cli('reconcile-execution', '--task', 'demo')).disposition).toBe('UNCHANGED');
     await writeFile(path.join(root, 'tracked.txt'), 'lifecycle change\n');
@@ -229,7 +251,22 @@ describe('LOCAL CLI data-plane integration', () => {
     await cli('record-evidence', '--task', 'demo', '--evidence-file', evidence);
     const prepared = await cli('run-prepare-review', '--task', 'demo');
     expect(prepared.state).toBe('EXECUTED');
-    await exchange(prepared.control, 'REVIEWER', 'DONE');
+    await exchange(prepared.control, 'REVIEWER', 'BLOCKED');
+    const reviewReplan = await resume(prepared.control);
+    expect(reviewReplan.iteration).toBe(2);
+    await exchange(reviewReplan.control, 'PLANNER', 'PLAN');
+    await cli('begin-execution', '--task', 'demo');
+    await writeFile(path.join(root, 'tracked.txt'), 'second lifecycle change\n');
+    const secondSnapshot = await cli('capture', '--task', 'demo');
+    await cli(
+      'record-evidence',
+      '--task',
+      'demo',
+      '--evidence-file',
+      await evidenceFile(secondSnapshot.snapshotId, 2),
+    );
+    const secondReview = await cli('run-prepare-review', '--task', 'demo');
+    await exchange(secondReview.control, 'REVIEWER', 'DONE');
     expect((await cli('run-status', '--task', 'demo')).state).toBe('DONE');
     expect(await localTaskActivity(root, 'demo')).toBe('DONE');
     await expect(cli('run-cancel', '--task', 'demo', '--reason', 'too late')).rejects.toThrow();

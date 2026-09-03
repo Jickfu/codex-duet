@@ -47,6 +47,7 @@ chatbridge local run-status --task demo
 chatbridge local confirm-control --task demo
 chatbridge local ingest-response --task demo --message-file .chatbridge/response.txt
 chatbridge local begin-execution --task demo
+chatbridge local reconcile-execution --task demo
 chatbridge local run-prepare-review --task demo
 ```
 
@@ -65,7 +66,11 @@ Preparation returns `control` and `controlFile`. Send the exact file through the
 
 Use the existing Codex Browser interaction commands to prepare, attempt, confirm and receive the exact control/response bytes. `confirm-control` validates that evidence; it does not send. `ingest-response` requires the exact recorded Browser response. After PLAN is accepted, begin-execution records intent; the caller edits and tests, uses capture/record-evidence, then run-prepare-review persists EXECUTED. Confirm and receive the Reviewer exchange before ingesting the result.
 
-PLAYWRIGHT_CLI and new MCP-source lifecycle responses are explicitly refused until their exact-proof adapters are implemented. No automatic provider switch occurs. Real Browser E2E, blocked-resume/cancellation and final M4 acceptance remain pending.
+`reconcile-execution` observes an EXECUTING run without advancing it: UNCHANGED, WORKTREE_IN_PROGRESS or REVIEW_PREPARED. Snapshot metadata may be stored, but no source edits, tests, new review targets or sends occur. REVIEW_PREPARED also reports live drift; explicitly use run-prepare-review to recover the published target.
+
+`chatbridge local run-cancel --task demo --reason "operator stop"` durably terminates a cancellable run without reverting code or retracting transport operations. Repeating the same reason is idempotent. Historical response replay cannot revive cancellation. See [ADR-022](adr/ADR-022-local-reconciliation-cancellation.md).
+
+PLAYWRIGHT_CLI and new MCP-source lifecycle responses are explicitly refused until their exact-proof adapters are implemented. No automatic provider switch occurs. Real Browser E2E, blocked-resume and final M4 acceptance remain pending.
 
 ## Target architecture
 

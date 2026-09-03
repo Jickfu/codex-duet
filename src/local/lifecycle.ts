@@ -34,6 +34,14 @@ const RunSchema = z
     maxIterations: z.number().int().min(1).max(100),
     control: z.string(),
     confirmed: z.boolean(),
+    cancellation: z
+      .object({
+        fromState: StateSchema,
+        reason: z.string().trim().min(1).max(4096),
+        cancelledAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
     plan: z.string().optional(),
     reviews: z.array(LocalReviewTargetV1Schema),
     responses: z.array(
@@ -175,6 +183,74 @@ export class LocalLifecycle {
     });
   }
 
+  /** Observe only: snapshot storage may grow, but run/provider authority never advances. */
+  async reconcileExecution(taskId: string) {
+    return this.lock.withLock(taskId, async () => {
+      const run = await this.status(taskId);
+      if (run.state !== 'EXECUTING') this.invalid();
+      const checkpoint = await this.provider.status(taskId);
+      const targets = checkpoint.reviews.map((review) => review.reviewTarget);
+      if (
+        canonicalJson(checkpoint.context) !== canonicalJson(run.spec.context) ||
+        canonicalJson(targets.slice(0, run.reviews.length)) !== canonicalJson(run.reviews) ||
+        targets.length < run.reviews.length ||
+        targets.length > run.reviews.length + 1
+      )
+        this.invalid();
+      const prepared = targets[run.reviews.length];
+      if (prepared) {
+        validateLocalReviewTargetIntegrity(prepared);
+        if (
+          prepared.iteration !== run.iteration ||
+          prepared.taskId !== taskId ||
+          prepared.workspaceId !== run.spec.context.workspaceId ||
+          prepared.baselineSnapshotId !== run.spec.context.baselineSnapshotId ||
+          prepared.previousReviewSnapshotId !== run.reviews.at(-1)?.reviewSnapshotId
+        )
+          this.invalid();
+      }
+      const expectedSnapshotId =
+        run.reviews.at(-1)?.reviewSnapshotId ?? run.spec.context.baselineSnapshotId;
+      const live = await this.snapshots.capture(taskId);
+      if (live.workspaceId !== run.spec.context.workspaceId) this.invalid();
+      return {
+        taskId,
+        state: run.state,
+        iteration: run.iteration,
+        disposition: prepared
+          ? 'REVIEW_PREPARED'
+          : live.snapshotId === expectedSnapshotId
+            ? 'UNCHANGED'
+            : 'WORKTREE_IN_PROGRESS',
+        expectedSnapshotId,
+        liveSnapshotId: live.snapshotId,
+        ...(prepared
+          ? {
+              reviewTarget: prepared,
+              liveMatchesReview: live.snapshotId === prepared.reviewSnapshotId,
+            }
+          : {}),
+      };
+    });
+  }
+
+  /** Cancellation stops future lifecycle work; it cannot undo workspace or transport effects. */
+  async cancel(taskId: string, reasonInput: string) {
+    const reason = z.string().trim().min(1).max(4096).parse(reasonInput);
+    return this.lock.withLock(taskId, async () => {
+      const run = await this.status(taskId);
+      if (run.state === 'CANCELLED') {
+        if (run.cancellation?.reason !== reason) this.invalid();
+        return run;
+      }
+      assertTransition(run.state, 'CANCELLED');
+      run.cancellation = { fromState: run.state, reason, cancelledAt: new Date().toISOString() };
+      run.state = 'CANCELLED';
+      await this.write(run);
+      return run;
+    });
+  }
+
   async prepareReview(taskId: string) {
     return this.lock.withLock(taskId, async () => {
       const run = await this.status(taskId);
@@ -257,6 +333,14 @@ export class LocalLifecycle {
 
   private validate(value: unknown, taskId: string): LocalRunV1 {
     const run = RunSchema.parse(value);
+    if (run.state === 'CANCELLED') {
+      if (!run.cancellation) this.invalid();
+      assertTransition(run.cancellation.fromState, 'CANCELLED');
+      const { cancellation, ...prior } = run;
+      this.validate({ ...prior, state: cancellation.fromState }, taskId);
+      return run;
+    }
+    if (run.cancellation) this.invalid();
     validateLocalTaskSpec(run.spec, run.spec.context);
     if (
       run.taskId !== taskId ||

@@ -14,14 +14,23 @@ async function fixture(maxIterations = 3) {
   let live = spec.context.baselineSnapshotId;
   const reviews: LocalReviewTargetV1[] = [];
   const snapshots = {
-    capture: vi.fn(),
+    capture: vi.fn(
+      async () => ({ snapshotId: live, workspaceId: spec.context.workspaceId }) as never,
+    ),
     async assertLiveSnapshot(expected: string) {
       if (expected !== live) throw new Error('drift');
     },
   };
   const provider = {
     async status() {
-      return { context: spec.context, reviews };
+      return {
+        context: spec.context,
+        reviews: reviews.map((reviewTarget) => ({
+          iteration: reviewTarget.iteration,
+          reviewSnapshotId: reviewTarget.reviewSnapshotId,
+          reviewTarget,
+        })),
+      };
     },
     async prepareReview({ iteration }: { iteration: number }) {
       if (reviews[iteration - 1]) return reviews[iteration - 1]!;
@@ -66,6 +75,8 @@ async function fixture(maxIterations = 3) {
     create,
     gates,
     init,
+    provider,
+    snapshots,
     setLive: (value: string) => {
       live = value;
     },
@@ -94,11 +105,110 @@ function response(run: LocalRunV1, state: 'PLAN' | 'DONE' | 'BLOCKED' = 'PLAN') 
   };
 }
 describe('LOCAL durable lifecycle', () => {
+  it('observes execution and a publication crash without advancing or recreating review', async () => {
+    const f = await fixture();
+    const initial = await f.init();
+    await expect(f.service.reconcileExecution('demo')).rejects.toThrow();
+    await f.service.confirmControl('demo');
+    await f.service.ingest(response(initial));
+    await f.service.beginExecution('demo');
+    const bytes = await readFile(f.file, 'utf8');
+    expect((await f.create().reconcileExecution('demo')).disposition).toBe('UNCHANGED');
+    f.setLive('c'.repeat(64));
+    expect((await f.create().reconcileExecution('demo')).disposition).toBe('WORKTREE_IN_PROGRESS');
+    await f.provider.prepareReview({ iteration: 1 });
+    expect(await f.create().reconcileExecution('demo')).toMatchObject({
+      disposition: 'REVIEW_PREPARED',
+      liveMatchesReview: true,
+    });
+    f.setLive('d'.repeat(64));
+    expect(await f.create().reconcileExecution('demo')).toMatchObject({
+      disposition: 'REVIEW_PREPARED',
+      liveMatchesReview: false,
+    });
+    expect(await readFile(f.file, 'utf8')).toBe(bytes);
+    expect((await f.provider.status()).reviews).toHaveLength(1);
+    const status = vi.spyOn(f.provider, 'status');
+    const checkpoint = await f.provider.status();
+    status.mockResolvedValueOnce({
+      ...checkpoint,
+      context: { ...checkpoint.context, workspaceId: 'other' },
+    });
+    await expect(f.service.reconcileExecution('demo')).rejects.toThrow();
+  });
+
+  it.each(['PLANNING', 'PLAN', 'EXECUTING', 'EXECUTED', 'REVIEWING', 'BLOCKED'] as const)(
+    'cancels %s durably without rollback and refuses late responses',
+    async (phase) => {
+      const f = await fixture();
+      const initial = await f.init();
+      if (phase !== 'PLANNING') {
+        await f.service.confirmControl('demo');
+        await f.service.ingest(response(initial, phase === 'BLOCKED' ? 'BLOCKED' : 'PLAN'));
+        if (['EXECUTING', 'EXECUTED', 'REVIEWING'].includes(phase))
+          await f.service.beginExecution('demo');
+        if (['EXECUTED', 'REVIEWING'].includes(phase)) await f.service.prepareReview('demo');
+        if (phase === 'REVIEWING') await f.service.confirmControl('demo');
+      }
+      const prior = await f.service.status('demo');
+      const cancelled = await f.service.cancel('demo', 'operator stop');
+      expect(cancelled).toEqual({
+        ...prior,
+        state: 'CANCELLED',
+        cancellation: {
+          fromState: phase,
+          reason: 'operator stop',
+          cancelledAt: expect.any(String),
+        },
+      });
+      expect(await f.create().cancel('demo', 'operator stop')).toEqual(cancelled);
+      await expect(f.create().cancel('demo', 'different')).rejects.toThrow();
+      await expect(f.create().beginExecution('demo')).rejects.toThrow();
+      await expect(f.create().prepareReview('demo')).rejects.toThrow();
+      await expect(f.create().confirmControl('demo')).rejects.toThrow();
+      if (phase === 'BLOCKED') {
+        expect((await f.create().ingest(response(prior, 'BLOCKED'))).disposition).toBe('REPLAY');
+      } else {
+        await expect(f.create().ingest(response(prior, 'BLOCKED'))).rejects.toThrow();
+      }
+      expect((await f.create().status('demo')).state).toBe('CANCELLED');
+      expect(f.snapshots.capture).not.toHaveBeenCalled();
+      await writeFile(
+        f.file,
+        JSON.stringify({
+          ...cancelled,
+          cancellation: { ...cancelled.cancellation, fromState: 'DONE' },
+        }),
+      );
+      await expect(f.create().status('demo')).rejects.toThrow();
+    },
+  );
   it('does not reuse a task ID owned by a GITHUB run', async () => {
     const f = await fixture();
     await f.init();
     await writeFile(path.join(f.root, 'runs', 'demo.json'), '{}');
     await expect(f.init()).rejects.toMatchObject({ code: 'LOCAL_TASK_MODE_CONFLICT' });
+  });
+  it('rechecks cancellation after response preflight and leaves pending ingress unaccepted', async () => {
+    const f = await fixture();
+    const initial = await f.init();
+    await f.service.confirmControl('demo');
+    f.gates.assertResponseReceived.mockImplementationOnce(async () => {
+      await f.create().cancel('demo', 'cancel during preflight');
+    });
+    const request = response(initial);
+    await expect(f.service.ingest(request)).rejects.toThrow();
+    const pendingFile = path.join(
+      f.root,
+      'runs',
+      'demo',
+      'ingress',
+      '1',
+      request.controlSha256 + '.json',
+    );
+    expect(JSON.parse(await readFile(pendingFile, 'utf8')).status).toBe('PENDING');
+    await expect(f.create().ingest(request)).rejects.toThrow();
+    expect((await f.create().status('demo')).state).toBe('CANCELLED');
   });
   it('runs two rounds through shared ingress, survives restart, and preserves exact replay', async () => {
     const f = await fixture();
@@ -120,6 +230,7 @@ describe('LOCAL durable lifecycle', () => {
       await f.create().ingest(response(prepared, iteration === 1 ? 'PLAN' : 'DONE'));
     }
     expect((await f.create().status('demo')).state).toBe('DONE');
+    await expect(f.create().cancel('demo', 'too late')).rejects.toThrow();
     await expect(f.create().beginExecution('demo')).rejects.toThrow();
     await expect(f.create().ingest({ ...plan, iteration: 2 })).rejects.toThrow();
   });

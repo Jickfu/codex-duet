@@ -219,7 +219,11 @@ describe('LOCAL CLI data-plane integration', () => {
     }
     await exchange(run.control, 'PLANNER', 'PLAN');
     await cli('begin-execution', '--task', 'demo');
+    expect((await cli('reconcile-execution', '--task', 'demo')).disposition).toBe('UNCHANGED');
     await writeFile(path.join(root, 'tracked.txt'), 'lifecycle change\n');
+    expect((await cli('reconcile-execution', '--task', 'demo')).disposition).toBe(
+      'WORKTREE_IN_PROGRESS',
+    );
     const candidate = await cli('capture', '--task', 'demo');
     const evidence = await evidenceFile(candidate.snapshotId);
     await cli('record-evidence', '--task', 'demo', '--evidence-file', evidence);
@@ -228,6 +232,7 @@ describe('LOCAL CLI data-plane integration', () => {
     await exchange(prepared.control, 'REVIEWER', 'DONE');
     expect((await cli('run-status', '--task', 'demo')).state).toBe('DONE');
     expect(await localTaskActivity(root, 'demo')).toBe('DONE');
+    await expect(cli('run-cancel', '--task', 'demo', '--reason', 'too late')).rejects.toThrow();
     expect(await git('rev-parse', 'HEAD')).toBe(head);
     expect(await git('remote')).toBe('');
   }, 60_000);

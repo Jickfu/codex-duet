@@ -105,6 +105,7 @@ export function registerLocalLifecycleCommands(
     ['run-status', 'status'],
     ['confirm-control', 'confirmControl'],
     ['begin-execution', 'beginExecution'],
+    ['reconcile-execution', 'reconcileExecution'],
     ['run-prepare-review', 'prepareReview'],
   ] as const) {
     local
@@ -115,6 +116,15 @@ export function registerLocalLifecycleCommands(
         report(await lifecycle[method](taskId));
       });
   }
+  local
+    .command('run-cancel')
+    .description('Cancel LOCAL lifecycle with a durable reason; no rollback or transport action')
+    .requiredOption('--task <id>')
+    .requiredOption('--reason <text>')
+    .action(async (o: { task: string; reason: string }) => {
+      const { taskId, lifecycle } = await runtime(o.task);
+      report(await lifecycle.cancel(taskId, o.reason));
+    });
   local
     .command('ingest-response')
     .description('Accept exact recorded Browser response through guarded shared ingress')

@@ -5,6 +5,19 @@ import { readLocalGit } from './git-reader.js';
 
 export type CapturedFile = { bytes: Buffer; executable: boolean };
 
+/** Git uses C-style byte escapes, not JSON Unicode escapes. */
+export function quoteGitPath(name: string): string {
+  return (
+    '"' +
+    Array.from(Buffer.from(name), (byte) => {
+      if (byte === 34 || byte === 92) return `\\${String.fromCharCode(byte)}`;
+      if (byte < 32 || byte >= 127) return `\\${byte.toString(8).padStart(3, '0')}`;
+      return String.fromCharCode(byte);
+    }).join('') +
+    '"'
+  );
+}
+
 /** Only two fixed regular files exist in this isolated directory. No pathspec security boundary. */
 export async function capturedFileDiff(
   name: string,
@@ -29,6 +42,8 @@ export async function capturedFileDiff(
       [
         '-c',
         'core.attributesFile=/dev/null',
+        '-c',
+        'core.autocrlf=false',
         'diff',
         '--no-index',
         '--no-ext-diff',
@@ -46,12 +61,12 @@ export async function capturedFileDiff(
     );
     if (!raw) return '';
     const lines = raw.split('\n');
-    lines[0] = `diff --git ${JSON.stringify(`a/${name}`)} ${JSON.stringify(`b/${name}`)}`;
+    lines[0] = `diff --git ${quoteGitPath(`a/${name}`)} ${quoteGitPath(`b/${name}`)}`;
     // Rewrite only metadata before the first hunk/binary payload, never source lines.
     for (let i = 1; i < lines.length; i++) {
       if (lines[i]!.startsWith('@@') || lines[i] === 'GIT binary patch') break;
-      if (lines[i] === '--- a/before') lines[i] = `--- ${JSON.stringify(`a/${name}`)}`;
-      if (lines[i] === '+++ b/after') lines[i] = `+++ ${JSON.stringify(`b/${name}`)}`;
+      if (lines[i] === '--- a/before') lines[i] = `--- ${quoteGitPath(`a/${name}`)}`;
+      if (lines[i] === '+++ b/after') lines[i] = `+++ ${quoteGitPath(`b/${name}`)}`;
     }
     return lines.join('\n');
   } finally {

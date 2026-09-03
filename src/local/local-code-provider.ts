@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { TaskIdSchema } from '../core/domain.js';
 import { ChatbridgeError } from '../core/errors.js';
 import { canonicalJson, sha256 } from '../duet/task-spec.js';
+import { TaskOperationLock } from '../duet/task-operation-lock.js';
 import type { LocalReviewProvider } from '../providers/code-provider.js';
 import {
   LocalContextRefSchema,
@@ -79,6 +80,7 @@ export interface LocalReviewEvidenceAuthority {
 export class LocalCodeProvider implements LocalReviewProvider {
   readonly mode = 'LOCAL' as const;
   private readonly store: LocalProviderCheckpointStore;
+  private readonly lock: TaskOperationLock;
 
   constructor(
     private readonly snapshots: LocalSnapshotAuthority,
@@ -86,9 +88,15 @@ export class LocalCodeProvider implements LocalReviewProvider {
     stateRoot: string,
   ) {
     this.store = new LocalProviderCheckpointStore(stateRoot);
+    // Separate from the outer lifecycle lock: callers may already hold that lock.
+    this.lock = new TaskOperationLock(path.join(stateRoot, 'local-provider'));
   }
 
   async prepareContext(taskIdInput: string): Promise<LocalContextRef> {
+    return this.lock.withLock(taskIdInput, () => this.prepareContextLocked(taskIdInput));
+  }
+
+  private async prepareContextLocked(taskIdInput: string): Promise<LocalContextRef> {
     const taskId = TaskIdSchema.parse(taskIdInput);
     const existing = await this.store.read(taskId);
     if (existing) {
@@ -121,6 +129,13 @@ export class LocalCodeProvider implements LocalReviewProvider {
   }
 
   async prepareReview(input: { taskId: string; iteration: number }): Promise<LocalReviewTargetV1> {
+    return this.lock.withLock(input.taskId, () => this.prepareReviewLocked(input));
+  }
+
+  private async prepareReviewLocked(input: {
+    taskId: string;
+    iteration: number;
+  }): Promise<LocalReviewTargetV1> {
     const taskId = TaskIdSchema.parse(input.taskId);
     const checkpoint = await this.requireCheckpoint(taskId);
     const iteration = z.number().int().positive().parse(input.iteration);
@@ -261,6 +276,8 @@ class LocalProviderCheckpointStore {
       const checkpoint = LocalProviderCheckpointV1Schema.parse(
         JSON.parse(await readFile(this.file(TaskIdSchema.parse(taskId)), 'utf8')),
       );
+      if (checkpoint.taskId !== taskId)
+        throw new ChatbridgeError('LOCAL checkpoint task identity mismatch', 'TASK_MISMATCH');
       checkpoint.reviews.forEach((review) =>
         validateLocalReviewTargetIntegrity(review.reviewTarget),
       );

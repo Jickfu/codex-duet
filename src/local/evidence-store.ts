@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { TaskIdSchema } from '../core/domain.js';
+import { ChatbridgeError } from '../core/errors.js';
 import { Sha256Schema } from './domain.js';
 import {
   LocalExecutionSummaryV1Schema,
@@ -28,7 +29,10 @@ export class LocalEvidenceStore implements LocalEvidenceReader {
       test.iteration !== summary.iteration ||
       test.snapshotId !== summary.snapshotId
     )
-      throw new Error('LOCAL_EVIDENCE_IDENTITY_MISMATCH');
+      throw new ChatbridgeError(
+        'LOCAL evidence identity mismatch',
+        'LOCAL_EVIDENCE_IDENTITY_MISMATCH',
+      );
     // Caller runs tests; this guard can only attest that the bound candidate remains live.
     await snapshots.assertLiveSnapshot(test.snapshotId);
     await createImmutableJson(
@@ -42,14 +46,34 @@ export class LocalEvidenceStore implements LocalEvidenceReader {
   }
 
   async readTestEvidence(taskId: string, iteration: number, snapshotId: string) {
-    return LocalTestEvidenceV1Schema.parse(
+    const record = LocalTestEvidenceV1Schema.parse(
       JSON.parse(await readFile(this.file(taskId, iteration, snapshotId, 'tests'), 'utf8')),
     );
+    this.assertIdentity(record, taskId, iteration, snapshotId);
+    return record;
   }
   async readExecutionSummary(taskId: string, iteration: number, snapshotId: string) {
-    return LocalExecutionSummaryV1Schema.parse(
+    const record = LocalExecutionSummaryV1Schema.parse(
       JSON.parse(await readFile(this.file(taskId, iteration, snapshotId, 'execution'), 'utf8')),
     );
+    this.assertIdentity(record, taskId, iteration, snapshotId);
+    return record;
+  }
+  private assertIdentity(
+    record: { taskId: string; iteration: number; snapshotId: string },
+    taskId: string,
+    iteration: number,
+    snapshotId: string,
+  ) {
+    if (
+      record.taskId !== taskId ||
+      record.iteration !== iteration ||
+      record.snapshotId !== snapshotId
+    )
+      throw new ChatbridgeError(
+        'LOCAL evidence identity mismatch',
+        'LOCAL_EVIDENCE_IDENTITY_MISMATCH',
+      );
   }
   private file(taskId: string, iteration: number, snapshotId: string, kind: 'tests' | 'execution') {
     return path.join(

@@ -23,6 +23,13 @@ const fakeWorkspace = {
 };
 
 describe('LocalMcpServer', () => {
+  it('rejects runtime non-loopback listen addresses', async () => {
+    const denied = new LocalMcpServer({
+      workspace: fakeWorkspace as never,
+      host: '0.0.0.0' as never,
+    });
+    await expect(denied.start()).rejects.toMatchObject({ code: 'LOCAL_MCP_HOST_DENIED' });
+  });
   let server: LocalMcpServer | undefined;
   let client: Client | undefined;
 

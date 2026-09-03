@@ -44,6 +44,11 @@ export class LocalMcpServer {
   async start(): Promise<{ host: string; port: number; url: string }> {
     if (this.http) throw new ChatbridgeError('Local MCP is already running', 'MCP_ALREADY_RUNNING');
     const host = this.options.host ?? '127.0.0.1';
+    if (host !== '127.0.0.1' && host !== '::1')
+      throw new ChatbridgeError(
+        'LOCAL MCP must bind an explicit loopback address',
+        'LOCAL_MCP_HOST_DENIED',
+      );
     this.http = createServer((request, response) => {
       void this.handle(request, response).catch(() => {
         if (!response.headersSent) response.writeHead(500, { 'content-type': 'application/json' });

@@ -48,7 +48,11 @@ export async function captureIgnorePolicy(root: string) {
   ).trim();
   const global =
     configured ||
-    path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'git', 'ignore');
+    path.join(
+      process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || os.homedir(), '.config'),
+      'git',
+      'ignore',
+    );
   // No --exclude-standard: even ignored .gitignore rule files must bind the policy.
   const names = [
     ...new Set(

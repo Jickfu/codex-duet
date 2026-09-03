@@ -54,6 +54,54 @@ describe('LOCAL provider checkpoint and drift authority', () => {
     },
   };
 
+  it('serializes independent instances so concurrent init and review publish once', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'local-provider-concurrent-'));
+    roots.push(root);
+    let captures = 0;
+    const authority: LocalSnapshotAuthority = {
+      async capture() {
+        captures++;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return snapshot(captures === 1 ? 'c' : 'd');
+      },
+      async assertLiveSnapshot() {},
+    };
+    const a = new LocalCodeProvider(authority, evidence, root);
+    const b = new LocalCodeProvider(authority, evidence, root);
+    const contexts = await Promise.all([a.prepareContext('demo'), b.prepareContext('demo')]);
+    expect(contexts[0]).toEqual(contexts[1]);
+    expect(captures).toBe(1);
+    const reviews = await Promise.all([
+      a.prepareReview({ taskId: 'demo', iteration: 1 }),
+      b.prepareReview({ taskId: 'demo', iteration: 1 }),
+    ]);
+    expect(reviews[0]).toEqual(reviews[1]);
+    expect(captures).toBe(2);
+    expect((await a.status('demo')).reviews).toHaveLength(1);
+  });
+
+  it('rejects a valid foreign-task checkpoint copied into the requested task path', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'local-provider-identity-'));
+    roots.push(root);
+    const provider = new LocalCodeProvider(
+      {
+        async capture() {
+          return snapshot('c');
+        },
+        async assertLiveSnapshot() {},
+      },
+      evidence,
+      root,
+    );
+    await provider.prepareContext('demo');
+    const file = path.join(root, 'runs', 'demo', 'local', 'provider.json');
+    const value = JSON.parse(await readFile(file, 'utf8'));
+    value.taskId = 'other';
+    value.context.taskId = 'other';
+    await writeFile(file, JSON.stringify(value));
+    await expect(provider.status('demo')).rejects.toMatchObject({ code: 'TASK_MISMATCH' });
+  });
+
   it('persists a baseline and a sequential multi-round review chain', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'local-provider-'));
     roots.push(root);

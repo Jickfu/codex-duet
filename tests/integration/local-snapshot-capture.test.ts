@@ -35,6 +35,20 @@ beforeEach(async () => {
 });
 
 describe('real LOCAL snapshot capture', () => {
+  it('binds the default global ignore policy under an overridden HOME', async () => {
+    const taskHome = await mkdtemp(path.join(os.tmpdir(), 'local-home-'));
+    vi.stubEnv('HOME', taskHome);
+    vi.stubEnv('XDG_CONFIG_HOME', '');
+    const directory = path.join(taskHome, '.config', 'git');
+    await mkdir(directory, { recursive: true });
+    const file = path.join(directory, 'ignore');
+    await writeFile(file, 'future-one.txt\n');
+    const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+    const first = await authority.capture('demo');
+    await writeFile(file, 'future-two.txt\n');
+    const second = await authority.capture('demo');
+    expect(second.snapshotId).not.toBe(first.snapshotId);
+  });
   it.each([false, true])(
     'never leaks sensitive descendants across file/directory replacement (reverse=%s)',
     async (reverse) => {

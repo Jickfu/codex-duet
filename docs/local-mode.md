@@ -80,7 +80,7 @@ chatbridge local resume-blocked --task demo --blocked-control-sha256 <blocked-co
 
 This appends a bound decision and returns PLANNING with a new control, not execution permission. Send, confirm and receive through the selected Browser workflow and accept a fresh PLAN before beginning execution. Reviewer blocking at N resumes planning for N+1 against the reviewed snapshot. The original TaskSpec is unchanged; scope or requirement changes require a new task. Exact retries preserve the decision and never consume a later block. See [ADR-023](adr/ADR-023-local-blocked-user-decisions.md). Pre-run Discussion blocking is not handled by this lifecycle command.
 
-PLAYWRIGHT_CLI and new MCP-source lifecycle responses are explicitly refused until their exact-proof adapters are implemented. No automatic provider switch occurs. Real Browser E2E and final M4 acceptance remain pending.
+PLAYWRIGHT_CLI remains refused until its exact-proof adapter is implemented. The default Browser CLI ingress also refuses new MCP-source responses. Explicitly enabled loopback servers can use the authenticated [MCP lifecycle adapter](adr/ADR-024-local-mcp-lifecycle-ingress.md): capability checks do not bypass confirmed Browser send, identity, state or live-snapshot guards. Accepted MCP replies leave Browser state truthful; matching durable acceptance permits the next control without inventing a Browser response. No automatic provider switch occurs. Real Browser E2E and final M4 acceptance remain pending.
 
 ## Target architecture
 

@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { registerLocalCommands } from '../../src/cli/local.js';
 import { localRequest, localSpec, rehashLocalSpec } from '../fixtures/local-task-spec.js';
 import { parseEnvelope, serializeEnvelope } from '../../src/core/protocol.js';
@@ -16,10 +19,25 @@ import { DiscussionStore } from '../../src/duet/discussion-store.js';
 import { DuetRunStore } from '../../src/duet/run-store.js';
 import { TaskBrowserStore } from '../../src/browser/task-browser-store.js';
 import { ConversationBindingLock } from '../../src/browser/conversation-binding-lock.js';
-import { localTaskActivity } from '../../src/local/activity.js';
+import { localTaskActivity, localMcpControlCompleted } from '../../src/local/activity.js';
+import { LocalMcpServer } from '../../src/local/mcp-server.js';
+import { LocalMcpLifecycleIngress } from '../../src/local/mcp-lifecycle-ingress.js';
+import { LocalMcpCapabilityStore } from '../../src/local/capability-store.js';
+import { GitLocalSnapshotAuthority } from '../../src/local/git-snapshot-authority.js';
+import { LocalCodeProvider } from '../../src/local/local-code-provider.js';
+import { LocalEvidenceStore } from '../../src/local/evidence-store.js';
+import { LocalWorkspaceService } from '../../src/local/workspace-service.js';
 
 const execute = promisify(execFile);
 let root: string;
+let mcpServer: LocalMcpServer | undefined;
+let mcpClient: Client | undefined;
+afterEach(async () => {
+  await mcpClient?.close();
+  await mcpServer?.close();
+  mcpClient = undefined;
+  mcpServer = undefined;
+});
 async function git(...args: string[]) {
   return (await execute('git', args, { cwd: root })).stdout;
 }
@@ -111,6 +129,7 @@ describe('LOCAL CLI data-plane integration', () => {
         runs: new DuetRunStore(stateRoot),
         lock: new ConversationBindingLock(stateRoot),
         activity: { getState: (id) => localTaskActivity(root, id) },
+        completedControl: (record) => localMcpControlCompleted(root, record),
       },
     );
     const url = 'https://chatgpt.com/c/fixture';
@@ -180,10 +199,26 @@ describe('LOCAL CLI data-plane integration', () => {
     expect((await cli('discussion-recover', '--task', 'demo')).status).toBe('CONVERGED');
     const run = await cli('run-init', '--task', 'demo');
     expect(run.state).toBe('PLANNING');
+    const snapshots = await GitLocalSnapshotAuthority.open(root, 'demo');
+    const evidenceStore = new LocalEvidenceStore(stateRoot);
+    const provider = new LocalCodeProvider(snapshots, evidenceStore, stateRoot);
+    const capabilities = new LocalMcpCapabilityStore(stateRoot);
+    mcpServer = new LocalMcpServer({
+      workspace: new LocalWorkspaceService(snapshots.store, evidenceStore),
+      submitResponse: {
+        enabled: true,
+        capabilities,
+        ingress: new LocalMcpLifecycleIngress(stateRoot, provider, snapshots, capabilities),
+      },
+    });
+    const address = await mcpServer.start();
+    mcpClient = new Client({ name: 'local-lifecycle-fixture', version: '1' });
+    await mcpClient.connect(new StreamableHTTPClientTransport(new URL(address.url)) as Transport);
     async function exchange(
       envelope: string,
       kind: 'PLANNER' | 'REVIEWER',
       state: 'PLAN' | 'DONE' | 'BLOCKED',
+      viaMcp = false,
     ) {
       await writeFile(outbound, envelope);
       const parsed = parseEnvelope(envelope);
@@ -211,8 +246,72 @@ describe('LOCAL CLI data-plane integration', () => {
       await expect(
         cli('ingest-response', '--task', 'demo', '--message-file', inbound),
       ).rejects.toThrow();
-      await interaction.recordCodexBrowserResponse('demo', inbound, url);
-      await cli('ingest-response', '--task', 'demo', '--message-file', inbound);
+      if (viaMcp) {
+        const controlSha256 = sha256(envelope);
+        const issued = await capabilities.issue({
+          taskId: 'demo',
+          iteration: parsed.iteration,
+          controlSha256,
+        });
+        const args = {
+          taskId: 'demo',
+          iteration: parsed.iteration,
+          controlSha256,
+          capabilityId: issued.capabilityId,
+          capability: issued.token,
+          response: await readFile(inbound, 'utf8'),
+        };
+        const submit = (arguments_: typeof args) =>
+          mcpClient!.callTool({ name: 'submit_response', arguments: arguments_ });
+        const receiptFile = path.join(
+          stateRoot,
+          'runs',
+          'demo',
+          'ingress',
+          String(parsed.iteration),
+          controlSha256 + '.json',
+        );
+        expect((await submit({ ...args, capability: 'x'.repeat(43) })).isError).toBe(true);
+        expect((await submit({ ...args, response: 'invalid C2C' })).isError).toBe(true);
+        await expect(readFile(receiptFile)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect((await submit(args)).isError).not.toBe(true);
+        const browser = (await new CodexBrowserControlStore(stateRoot).read('demo'))!;
+        expect(browser.operation.state).toBe('CONFIRMED');
+        expect(browser.operation.inboundSha256).toBeUndefined();
+        expect(await localMcpControlCompleted(root, browser)).toBe(true);
+        const receipt = JSON.parse(await readFile(receiptFile, 'utf8'));
+        expect(receipt.source).toBe('MCP');
+        for (const changed of [
+          { responseSha256: 'f'.repeat(64) },
+          { source: 'BROWSER' },
+          { acceptedAt: undefined },
+        ]) {
+          await writeFile(receiptFile, JSON.stringify({ ...receipt, ...changed }));
+          expect(await localMcpControlCompleted(root, browser)).toBe(false);
+        }
+        await writeFile(
+          receiptFile,
+          JSON.stringify({ ...receipt, status: 'PENDING', acceptedAt: undefined }),
+        );
+        expect(await localMcpControlCompleted(root, browser)).toBe(false);
+        expect((await submit(args)).isError).not.toBe(true);
+        expect(await localMcpControlCompleted(root, browser)).toBe(true);
+        expect((await submit({ ...args, response: args.response + ' ' })).isError).toBe(true);
+        await expect(
+          interaction.prepareCodexBrowser(
+            'demo',
+            outbound,
+            { kind, iteration: parsed.iteration },
+            url,
+          ),
+        ).rejects.toMatchObject({ code: 'CONTROL_ALREADY_COMPLETED' });
+        expect(JSON.stringify(await cli('run-status', '--task', 'demo'))).not.toContain(
+          issued.token,
+        );
+      } else {
+        await interaction.recordCodexBrowserResponse('demo', inbound, url);
+        await cli('ingest-response', '--task', 'demo', '--message-file', inbound);
+      }
       expect(
         (await cli('ingest-response', '--task', 'demo', '--message-file', inbound)).disposition,
       ).toBe('REPLAY');
@@ -239,7 +338,7 @@ describe('LOCAL CLI data-plane integration', () => {
       return resumed;
     }
     const replanned = await resume(run.control);
-    await exchange(replanned.control, 'PLANNER', 'PLAN');
+    await exchange(replanned.control, 'PLANNER', 'PLAN', true);
     await cli('begin-execution', '--task', 'demo');
     expect((await cli('reconcile-execution', '--task', 'demo')).disposition).toBe('UNCHANGED');
     await writeFile(path.join(root, 'tracked.txt'), 'lifecycle change\n');
@@ -251,7 +350,7 @@ describe('LOCAL CLI data-plane integration', () => {
     await cli('record-evidence', '--task', 'demo', '--evidence-file', evidence);
     const prepared = await cli('run-prepare-review', '--task', 'demo');
     expect(prepared.state).toBe('EXECUTED');
-    await exchange(prepared.control, 'REVIEWER', 'BLOCKED');
+    await exchange(prepared.control, 'REVIEWER', 'BLOCKED', true);
     const reviewReplan = await resume(prepared.control);
     expect(reviewReplan.iteration).toBe(2);
     await exchange(reviewReplan.control, 'PLANNER', 'PLAN');
@@ -266,7 +365,7 @@ describe('LOCAL CLI data-plane integration', () => {
       await evidenceFile(secondSnapshot.snapshotId, 2),
     );
     const secondReview = await cli('run-prepare-review', '--task', 'demo');
-    await exchange(secondReview.control, 'REVIEWER', 'DONE');
+    await exchange(secondReview.control, 'REVIEWER', 'DONE', true);
     expect((await cli('run-status', '--task', 'demo')).state).toBe('DONE');
     expect(await localTaskActivity(root, 'demo')).toBe('DONE');
     await expect(cli('run-cancel', '--task', 'demo', '--reason', 'too late')).rejects.toThrow();

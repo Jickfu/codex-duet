@@ -78,6 +78,7 @@ export class LocalMcpCapabilityStore {
     const actual = Buffer.from(sha256(request.token), 'hex');
     if (
       !timingSafeEqual(expected, actual) ||
+      record.capabilityId !== request.capabilityId ||
       record.taskId !== request.taskId ||
       record.iteration !== request.iteration ||
       record.controlSha256 !== request.controlSha256

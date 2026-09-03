@@ -26,6 +26,7 @@ export class InteractionService {
       runs: DuetRunStore;
       lock: ConversationBindingLock;
       activity?: TaskActivityResolver;
+      completedControl?: (record: CodexBrowserControlV1) => Promise<boolean>;
     },
   ) {}
 
@@ -87,7 +88,16 @@ export class InteractionService {
         'Previous Codex Browser send was attempted; automatic resend is forbidden',
         'CODEX_BROWSER_RESEND_FORBIDDEN',
       );
-    if (existing?.operation.state === 'CONFIRMED')
+    const completedElsewhere =
+      existing?.operation.state === 'CONFIRMED'
+        ? ((await this.reservations?.completedControl?.(existing)) ?? false)
+        : false;
+    if (completedElsewhere && existing?.operation.operationId === operationId)
+      throw new ChatbridgeError(
+        'Control already completed through another response transport',
+        'CONTROL_ALREADY_COMPLETED',
+      );
+    if (existing?.operation.state === 'CONFIRMED' && !completedElsewhere)
       throw new ChatbridgeError(
         'Confirmed Codex Browser operation is waiting for a response',
         'CODEX_BROWSER_RESPONSE_PENDING',

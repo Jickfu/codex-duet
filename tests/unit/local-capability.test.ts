@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -50,6 +50,22 @@ describe('LocalMcpCapabilityStore', () => {
         capabilityId: issued.capabilityId,
         token: issued.token,
         taskId: 'other',
+        iteration: 1,
+        controlSha256,
+      }),
+    ).rejects.toMatchObject({ code: 'MCP_CAPABILITY_INVALID' });
+  });
+  it('rejects a valid record copied under another capability ID', async () => {
+    const store = new LocalMcpCapabilityStore(root);
+    const first = await store.issue({ taskId: 'demo', iteration: 1, controlSha256 });
+    const second = await store.issue({ taskId: 'demo', iteration: 1, controlSha256 });
+    const file = (id: string) => path.join(root, 'mcp', 'capabilities', id + '.json');
+    await writeFile(file(second.capabilityId), await readFile(file(first.capabilityId)));
+    await expect(
+      store.authorize({
+        capabilityId: second.capabilityId,
+        token: first.token,
+        taskId: 'demo',
         iteration: 1,
         controlSha256,
       }),

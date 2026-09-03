@@ -17,7 +17,7 @@ import { CodexBrowserControlStore } from '../duet/codex-browser-control-store.js
 import { InteractionService } from '../duet/interaction-service.js';
 import { DiscussionStore } from '../duet/discussion-store.js';
 import { DiscussionService } from '../duet/discussion-service.js';
-import { localTaskActivity } from '../local/activity.js';
+import { localTaskActivity, localMcpControlCompleted } from '../local/activity.js';
 import { loadConfig } from '../config/config.js';
 import { TaskBrowserStore } from '../browser/task-browser-store.js';
 import { ConversationBindingLock } from '../browser/conversation-binding-lock.js';
@@ -78,6 +78,7 @@ function interactionServices() {
             return github?.state ?? local;
           },
         },
+        completedControl: (record) => localMcpControlCompleted(process.cwd(), record),
         lock: new ConversationBindingLock(stateRoot),
       },
     ),

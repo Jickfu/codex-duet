@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { z } from 'zod';
 import { ChatbridgeError } from '../core/errors.js';
-import type { ResponseIngressService } from '../duet/response-ingress.js';
+import type { ResponseIngressRequest } from '../duet/response-ingress.js';
 import { canonicalJson } from '../duet/task-spec.js';
 import type { LocalMcpCapabilityStore } from './capability-store.js';
 import { LOCAL_LIMITS } from './limits.js';
@@ -32,7 +32,12 @@ export type LocalMcpServerOptions = {
   submitResponse?: {
     enabled: true;
     capabilities: LocalMcpCapabilityStore;
-    ingress: ResponseIngressService;
+    ingress: {
+      accept(
+        request: ResponseIngressRequest,
+        credential: { capabilityId: string; token: string },
+      ): Promise<unknown>;
+    };
   };
 };
 
@@ -110,13 +115,16 @@ export class LocalMcpServer {
             iteration: input.iteration,
             controlSha256: input.controlSha256,
           });
-          await submission.ingress.accept({
-            taskId: input.taskId,
-            iteration: input.iteration,
-            controlSha256: input.controlSha256,
-            response: input.response,
-            source: 'MCP',
-          });
+          await submission.ingress.accept(
+            {
+              taskId: input.taskId,
+              iteration: input.iteration,
+              controlSha256: input.controlSha256,
+              response: input.response,
+              source: 'MCP',
+            },
+            { capabilityId: input.capabilityId, token: input.capability },
+          );
           return result({ accepted: true });
         },
       );

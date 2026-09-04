@@ -8,6 +8,7 @@ import { wait } from './wait.js';
 import { status } from './status.js';
 import { doctor } from './doctor.js';
 import { installationDoctor } from './readiness.js';
+import { onboardingCommand } from './onboarding.js';
 import { detach } from './detach.js';
 import { ChatbridgeError } from '../core/errors.js';
 import { githubDoctor, githubInitTask, githubPrepareReview, githubStatus } from './github.js';
@@ -39,6 +40,15 @@ const program = new Command()
   });
 const browser = program.command('browser').description('Manage the isolated browser');
 registerLocalCommands(program);
+program
+  .command('onboard')
+  .description('Check first-use project prerequisites without network or project changes')
+  .addOption(
+    new Option('--mode <mode>', 'intended data plane')
+      .choices(['github', 'local'])
+      .makeOptionMandatory(),
+  )
+  .action(onboardingCommand);
 program
   .command('doctor')
   .description('Check offline installation prerequisites without opening a browser or tunnel')

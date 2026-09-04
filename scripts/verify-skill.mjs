@@ -109,6 +109,19 @@ git([
 ]);
 run([launcher, 'local', 'init-task', '--task', 'skill-smoke'], target);
 await access(path.join(target, '.chatbridge'));
+for (const mode of ['github', 'local']) {
+  let report;
+  try {
+    run([launcher, 'onboard', '--mode', mode], target);
+    assert.fail('Missing contracts must fail onboarding');
+  } catch (error) {
+    assert.equal(error.status, 1);
+    report = JSON.parse(error.stdout);
+  }
+  assert.equal(report.localPrerequisitesReady, false);
+  assert.equal(report.taskReady, false);
+  assert.equal(report.checks.find((check) => check.name === 'browser').status, 'REQUIRED');
+}
 await assert.rejects(access(path.join(installed, '.chatbridge')), { code: 'ENOENT' });
 // Exercise the documented natural-language install's actual project-scoped command.
 const headBefore = git(['rev-parse', 'HEAD']);

@@ -37,3 +37,5 @@ node .agents/skills/codex-duet/scripts/chatbridge.mjs doctor
 Report the absolute installed path and actual doctor result. Tell the user to invoke codex-duet for their development task; if not listed yet, restart Codex or read that `SKILL.md` explicitly. Repository discovery uses `.agents/skills`, as documented by [OpenAI](https://learn.chatgpt.com/docs/build-skills).
 
 Installation must not create a development task, edit contracts, commit or push, attach a browser, grant OAuth, or change global Codex configuration. Preserve the project's `.chatbridge` directory. The installed `.gitignore` excludes dependencies; skill files remain project additions whose version-control handling should be decided before a clean-worktree GITHUB task.
+
+After reporting successful installation, run `onboard --mode github` when the user intends GITHUB, or `--mode local` for LOCAL, and summarize its next actions. A FAIL onboarding result does not undo installation success. External REQUIRED items and `taskReady: false` must not be reported as verified. See [first-use checks](docs/first-use.md).

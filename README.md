@@ -37,7 +37,7 @@ Run commands from your target project's root:
 
 ```text
 node .agents/skills/codex-duet/scripts/chatbridge.mjs doctor
-node .agents/skills/codex-duet/scripts/chatbridge.mjs --help
+node .agents/skills/codex-duet/scripts/chatbridge.mjs onboard --mode github
 ```
 
 `doctor` checks installation prerequisites. A GITHUB task also needs GitHub access, Planner/Reviewer contracts in its baseline and the chosen browser connection. Installation does not create contracts, commit or push, or send ChatGPT messages. Installed skill files are project additions; decide how to version them before starting a workflow that requires a clean worktree.
@@ -52,6 +52,8 @@ node .agents/skills/codex-duet/scripts/chatbridge.mjs --help
 Codex remains the sole executor. Each task selects one browser provider. Uncertain sends are not automatically replayed. Login is manual. Keep the project's `.chatbridge` directory: it contains task state and recovery evidence.
 
 The bundled skill recipe covers GITHUB mode. LOCAL usage is documented separately; installation does not configure a tunnel, OAuth grant or MCP connection. Automated PR creation and production remote deployment are not included.
+
+See [first-use checks](docs/first-use.md) for interpreting FAIL/REQUIRED results and setting up the first task.
 
 ## Documentation
 

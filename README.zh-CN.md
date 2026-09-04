@@ -37,7 +37,7 @@ npm --prefix "<解压后的codex-duet目录>" run install:project -- --project "
 
 ```text
 node .agents/skills/codex-duet/scripts/chatbridge.mjs doctor
-node .agents/skills/codex-duet/scripts/chatbridge.mjs --help
+node .agents/skills/codex-duet/scripts/chatbridge.mjs onboard --mode github
 ```
 
 `doctor` 检查安装前置条件。GITHUB 任务还需要 GitHub 访问、目标基线中的 Planner/Reviewer 合同，以及所选浏览器连接。安装不会创建合同、提交、推送或发送 ChatGPT 消息。安装后的 skill 文件属于项目新增文件；启动要求干净工作区的流程前，需要决定如何将它们纳入版本管理。
@@ -52,6 +52,8 @@ node .agents/skills/codex-duet/scripts/chatbridge.mjs --help
 Codex 始终是唯一执行者。每个任务固定一个浏览器提供方，发送结果不明确时不会自动重发。登录由用户完成。请保留项目的 `.chatbridge` 目录，它保存任务状态和恢复证据。
 
 当前附带的 skill 流程覆盖 GITHUB 模式，LOCAL 使用方法另有文档。安装不会配置隧道、OAuth 授权或 MCP 连接。目前不包含自动创建 PR 或生产级远程部署。
+
+参见[首次使用检查](docs/first-use.md)，逐项处理缺失条件并准备第一个任务。
 
 ## 文档
 

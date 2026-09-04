@@ -31,6 +31,8 @@ for (const name of paths) {
   assert.ok(
     name === 'package.json' ||
       name === 'README.md' ||
+      name === 'README.zh-CN.md' ||
+      name === 'INSTALL.md' ||
       name === 'LICENSE' ||
       /^docs\/[\w./-]+\.md$/.test(name) ||
       /^dist\/[\w/-]+(?:\.d\.ts|\.js|\.js\.map)$/.test(name),

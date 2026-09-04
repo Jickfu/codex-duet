@@ -1,118 +1,77 @@
-# codex-duet
+# Codex Duet
 
-`codex-duet` is a responsibility-separated software-development loop:
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-> ChatGPT thinks and reviews. Codex acts.
+**ChatGPT plans and reviews. Codex implements.** A guarded development workflow with durable task state and immutable review evidence.
 
-ChatGPT Web is the planner, architect, and reviewer. Codex Desktop is the outer orchestrator, and Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries compact control messages without feeding screenshots, DOM snapshots, chat history, repositories, or large diffs into the model context.
+## Install into your project with Codex
 
-This release includes the **Frozen M2 GitHub Mode MVP** and frozen M3 Durable Desktop Orchestration with real Desktop acceptance. M4 implements the LOCAL immutable snapshot/read-only MCP data plane, guarded lifecycle, both selected Browser providers and optional Discussion; its acceptance scope is local/fixture-based. M5 adds a [remote development service](docs/remote-local-mode.md) with temporary HTTPS, local OAuth approval and read-only task grants; a [generated-task live acceptance](docs/milestones/M5-live-acceptance-2026-09-04.md) passed with bounded format repair and an authorized conversation handoff. M5 is [frozen for the accepted single-user development scope](docs/milestones/M5-remote-development-freeze.md). PR automation is not implemented.
-
-**M4's locally testable scope is frozen.** See the [exact implementation ref, verification and limits](docs/milestones/M4-local-readonly-mcp.md).
-
-## Architecture summary
+Open your target project in Codex and send:
 
 ```text
-Codex          = Execute
-ChatGPT Web    = Plan + Architect + Review
-Browser Bridge = Shared Control Plane
-
-GITHUB mode → GitHub Data Plane
-LOCAL mode  → Read-only MCP Data Plane (frozen local M4; remote M5 development)
+帮我安装这个 skill 到本项目下：https://github.com/Jickfu/codex-duet
+请阅读仓库的 INSTALL.md，完成项目内安装并验证 doctor。
 ```
 
-GITHUB mode is implemented and frozen at M2. M3.0 through M3.3 are frozen with real Desktop E2E acceptance. M3.3 adds an immutable per-task Browser provider choice and optional bounded Discussion. M4 adds separate LOCAL snapshot/review authority without requiring a commit, push or remote; its disabled-by-default `submit_response` needs an exact control-scoped capability. Recovery does not claim exactly-once arbitrary external effects. Both modes share C2C, state transitions and response ingress. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), [the M3 milestone](docs/milestones/M3-durable-orchestrator.md), and [LOCAL mode](docs/local-mode.md).
+Codex should execute [INSTALL.md](INSTALL.md): download the complete bundle, install it into **`<your-project>/.agents/skills/codex-duet/`**, install dependencies and verify `doctor`. Copying `SKILL.md` alone is insufficient. An existing installation is preserved rather than overwritten.
 
-## Install the downloadable skill (recommended)
+Requires **Node.js 20+, npm, Git and network access**. No pnpm, source compilation or global installation is needed. The runtime comes from the included tarball; its dependencies are downloaded from the npm registry. This project is not published to npm.
 
-Download the [standalone skill ZIP](https://github.com/Jickfu/codex-duet/raw/refs/heads/main/skill/codex-duet.zip) and extract `codex-duet`, or download this repository as a ZIP and extract **`skill/codex-duet`**, including its assets and scripts. The [skill folder](skill/codex-duet) contains `SKILL.md`, the workflow reference and a precompiled runtime tarball. Follow [the installation guide](skill/codex-duet/INSTALL.md). Node 20+, npm and Git are required; no source build or global installation is needed. The bundled codex-duet runtime is installed from a local file; its dependencies still require registry access. Nothing is published to npm.
+> AI assistants: an installation request means execute [the installation procedure](INSTALL.md). Do not start the Planner/Reviewer workflow or modify the user's application as part of installation.
 
-Inside the downloaded skill directory:
+## Manual installation
+
+[Download the standalone skill ZIP](https://raw.githubusercontent.com/Jickfu/codex-duet/main/skill/codex-duet.zip), extract it to a temporary directory, and replace both paths below with absolute paths:
 
 ```text
-npm run setup
-node scripts/chatbridge.mjs doctor
+npm --prefix "<extracted-codex-duet-directory>" run install:project -- --project "<your-project>"
 ```
 
-Ask Codex to use that directory's `SKILL.md`. Run task commands from your target project's root using `node "<absolute-skill-directory>/scripts/chatbridge.mjs" ...`. The current skill recipe orchestrates GITHUB tasks; the runtime also includes the documented LOCAL commands. Setup does not authorize task initialization, Git pushes or Browser sends.
+The installer copies the complete skill, installs dependencies and verifies readiness. It stops if the destination exists. [Browse the bundle](skill/codex-duet).
 
-## Build from source
+## Use the installed skill
 
-Requirements: Node.js >=22.13 for pnpm 11; installed runtime supports Node >=20.
+Ask Codex to use **codex-duet** to plan, implement and review a task. Codex discovers repository skills under `.agents/skills`; if it is not visible, restart Codex or ask it to read `.agents/skills/codex-duet/SKILL.md`. See [OpenAI's skill documentation](https://learn.chatgpt.com/docs/build-skills).
+
+Run commands from your target project's root:
 
 ```text
-pnpm install
+node .agents/skills/codex-duet/scripts/chatbridge.mjs doctor
+node .agents/skills/codex-duet/scripts/chatbridge.mjs --help
+```
+
+`doctor` checks installation prerequisites. A GITHUB task also needs GitHub access, Planner/Reviewer contracts in its baseline and the chosen browser connection. Installation does not create contracts, commit or push, or send ChatGPT messages. Installed skill files are project additions; decide how to version them before starting a workflow that requires a clean worktree.
+
+## Supported workflows
+
+| Mode   | How ChatGPT reads code                      | Scope                                                                           |
+| ------ | ------------------------------------------- | ------------------------------------------------------------------------------- |
+| GITHUB | Immutable GitHub commit ranges              | Included skill recipe: planning, execution and multi-round review               |
+| LOCAL  | Immutable read-only Git workspace snapshots | Runtime commands and guides; remote access accepted for single-user development |
+
+Codex remains the sole executor. Each task selects one browser provider. Uncertain sends are not automatically replayed. Login is manual. Keep the project's `.chatbridge` directory: it contains task state and recovery evidence.
+
+The bundled skill recipe covers GITHUB mode. LOCAL usage is documented separately; installation does not configure a tunnel, OAuth grant or MCP connection. Automated PR creation and production remote deployment are not included.
+
+## Documentation
+
+- [Project installation](INSTALL.md) and [installation/recovery](docs/installation-and-recovery.md)
+- [GITHUB](docs/github-mode.md), [LOCAL](docs/local-mode.md) and [remote LOCAL setup](docs/remote-local-mode.md)
+- [Browser connection](docs/browser-bridge.md), [protocol](docs/protocol.md) and [security](docs/security.md)
+- [Architecture and milestone status](docs/architecture.md)
+- [Distribution maintenance](docs/skill-distribution.md) and [validation evidence](docs/milestones/M6-skill-distribution.md)
+
+## Development
+
+Source builds use Node >=22.13 and pnpm 11.17.0:
+
+```text
+pnpm install --frozen-lockfile
 pnpm build
-pnpm link --global
+npm run typecheck
+npm run lint
 ```
 
-Installation checks, verified tarballs and evidence-preserving recovery are documented in [installation and recovery](docs/installation-and-recovery.md). Run `chatbridge doctor` for an offline prerequisite check before browser or remote setup.
+Follow the [maintainer workflow](docs/skill-distribution.md) to update distribution artifacts. CI runs full regression on Windows/Linux/macOS, then package and skill installation checks on Node 20/22/24. Browser tests use fixtures, without a ChatGPT account; live acceptance has a separately documented scope.
 
-## Recommended: Extension Existing Session
-
-Install and enable the official Playwright Extension in everyday Chrome or Edge, keep the existing ChatGPT tab logged in, then run `chatbridge browser doctor` and `chatbridge browser attach`. This reuses tabs, cookies, SSO/2FA, and login state without creating a second profile or downloading Chromium. The official Agent CLI is pinned as a dependency; codex-duet never uses runtime `npx` downloads.
-
-## Alternative: Channel CDP Existing Session
-
-In normal Chrome or Edge, open `chrome://inspect/#remote-debugging`, enable “Allow remote debugging for this browser instance”, then use `chatbridge browser attach --transport cdp --browser chrome` or `--browser msedge`. Advanced raw endpoints remain available through `--endpoint`.
-
-```text
-chatbridge browser doctor
-chatbridge browser attach
-chatbridge browser attach --browser chrome --transport cdp
-chatbridge browser attach --browser msedge --transport cdp --endpoint http://127.0.0.1:9224
-```
-
-If no attachable browser is found, `attach` starts installed Chrome and then Edge through Playwright's official browser channels, using `.chatbridge/profile`. Log in manually the first time. The bridge never reads, exports, or logs passwords, cookies, tokens, or browser storage.
-
-If native attachment is unavailable, auto mode starts installed Chrome then Edge with a dedicated `.chatbridge/profile`; it never automates the daily browser's default profile.
-
-## Bundled browser fallback and development
-
-Bundled Chromium remains the fixture/CI browser and an explicit fallback. It is never installed silently:
-
-```text
-pnpm exec playwright install chromium
-chatbridge browser attach --browser bundled
-```
-
-`chatbridge browser detach` releases an existing session without closing the user's browser or tabs.
-
-## Send and wait
-
-Write an `INIT` or `EXECUTED` C2C/1 message to a file, then:
-
-```text
-chatbridge send --message-file ./message.txt
-chatbridge wait
-chatbridge wait --parse
-chatbridge status
-```
-
-`wait` performs deterministic DOM waiting internally and prints only the final assistant message. `--parse` rejects malformed C2C/1 and emits validated JSON. It times out rather than returning an incomplete streaming response.
-
-## GitHub Mode
-
-GitHub Mode creates one safe `agent/task-<taskId>` branch per task and produces an immutable full-SHA review range after a verified push:
-
-```text
-chatbridge github doctor
-chatbridge github init-task --task demo
-# edit, test, and commit
-chatbridge github prepare-review --task demo --tests PASS
-chatbridge github status --task demo
-```
-
-The worktree must be clean at initialization and review preparation. The tool never stashes, resets, cleans, force-pushes, or modifies the default branch. See [M2 GitHub Mode](docs/milestones/M2-github-mode.md).
-
-## Security and limitations
-
-- Browser automation uses the public ChatGPT UI and official Playwright APIs, never private or reverse-engineered APIs.
-- Existing-browser automation has a mandatory origin allowlist; non-ChatGPT tabs are not inspected or operated.
-- Login is manual. The isolated profile is local and must remain uncommitted.
-- M1.2 supports one selected runtime and one outstanding send checkpoint per project.
-- ChatGPT UI changes can require updates to the centralized adapter selectors.
-- Real ChatGPT E2E is manual; CI fixtures are local and require no account.
-- LOCAL supports Git worktrees with an existing HEAD, immutable bounded snapshots and a loopback server library. The separate [M5 remote development service](docs/remote-local-mode.md) adds authenticated temporary exposure; a generated-task live ChatGPT LOCAL loop reached DONE; M5 is frozen for this development scope. See [LOCAL setup and limits](docs/local-mode.md).
-
-See [protocol](docs/protocol.md), [security](docs/security.md), and the [Browser Bridge](docs/browser-bridge.md).
+[Apache-2.0 license](LICENSE).

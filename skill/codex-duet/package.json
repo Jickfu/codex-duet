@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "node scripts/install.mjs"
+    "setup": "node scripts/install.mjs",
+    "install:project": "node scripts/install-project.mjs"
   },
   "engines": {
     "node": ">=20"

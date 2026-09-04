@@ -37,6 +37,8 @@ await writeFile(
             'tsconfig.build.json',
             'tsconfig.json',
             'README.md',
+            'README.zh-CN.md',
+            'INSTALL.md',
             'LICENSE',
           ],
           { cwd: root, encoding: 'utf8' },

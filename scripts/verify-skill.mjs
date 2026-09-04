@@ -1,6 +1,15 @@
 import { Buffer } from 'node:buffer';
 import assert from 'node:assert/strict';
-import { access, copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import {
+  access,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  writeFile,
+  symlink,
+} from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
@@ -23,6 +32,7 @@ const files = [
   'assets/codex-duet.tgz',
   'scripts/install.mjs',
   'scripts/chatbridge.mjs',
+  'scripts/install-project.mjs',
 ];
 async function list(dir, prefix = '') {
   const found = [];
@@ -100,6 +110,43 @@ git([
 run([launcher, 'local', 'init-task', '--task', 'skill-smoke'], target);
 await access(path.join(target, '.chatbridge'));
 await assert.rejects(access(path.join(installed, '.chatbridge')), { code: 'ENOENT' });
+// Exercise the documented natural-language install's actual project-scoped command.
+const headBefore = git(['rev-parse', 'HEAD']);
+const fixtureBefore = await readFile(path.join(target, 'fixture.txt'));
+await writeFile(path.join(target, '.chatbridge/preserve.txt'), 'existing task evidence');
+await mkdir(path.join(target, '.agents/skills/other'), { recursive: true });
+await writeFile(path.join(target, '.agents/skills/other/SKILL.md'), 'existing unrelated skill');
+run([npm, '--prefix', installed, 'run', 'install:project', '--', '--project', target], target);
+const projectSkill = path.join(target, '.agents/skills/codex-duet');
+assert.equal(
+  JSON.parse(run([path.join(projectSkill, 'scripts/chatbridge.mjs'), 'doctor'], target)).ready,
+  true,
+);
+assert.equal(git(['rev-parse', 'HEAD']), headBefore);
+assert.deepEqual(await readFile(path.join(target, 'fixture.txt')), fixtureBefore);
+assert.equal(
+  await readFile(path.join(target, '.chatbridge/preserve.txt'), 'utf8'),
+  'existing task evidence',
+);
+assert.equal(
+  await readFile(path.join(target, '.agents/skills/other/SKILL.md'), 'utf8'),
+  'existing unrelated skill',
+);
+const skillBefore = await readFile(path.join(projectSkill, 'SKILL.md'));
+assert.throws(() => run([npm, 'run', 'install:project', '--', '--project', target]));
+assert.deepEqual(await readFile(path.join(projectSkill, 'SKILL.md')), skillBefore);
+await assert.rejects(access(path.join(projectSkill, '.chatbridge')), { code: 'ENOENT' });
+const redirected = path.join(temp, 'redirected project');
+const outside = path.join(temp, 'outside skills');
+await mkdir(redirected);
+await mkdir(outside);
+await symlink(
+  outside,
+  path.join(redirected, '.agents'),
+  process.platform === 'win32' ? 'junction' : 'dir',
+);
+assert.throws(() => run([npm, 'run', 'install:project', '--', '--project', redirected]));
+assert.deepEqual(await readdir(outside), []);
 // Ensure the checked-in runtime is current, even if the version number did not change.
 const currentFiles = await list(path.join(root, 'dist'));
 assert.deepEqual(
@@ -126,6 +173,8 @@ console.log(
       temp,
       corruptedDownloadRejected: true,
       callerDirectoryPreserved: true,
+      projectInstallVerified: true,
+      existingSkillPreserved: true,
     },
     null,
     2,

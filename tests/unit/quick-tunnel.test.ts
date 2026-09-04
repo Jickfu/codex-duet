@@ -28,6 +28,7 @@ describe('owned Quick Tunnel', () => {
     child.stderr.write('x'.repeat(5000) + ' https://ignored.trycloudflare.com\n');
     child.stderr.write(' | https://gentle-river.trycloud');
     child.stderr.write('flare.com |\n');
+    child.stderr.write('2026-09-04T00:00:00Z INF Registered tunnel connection connIndex=0\n');
     expect(await started).toBe('https://gentle-river.trycloudflare.com');
     expect(spawn).toHaveBeenCalledWith('C:/Program Files/cloudflared.exe', [
       'tunnel',
@@ -47,6 +48,7 @@ describe('owned Quick Tunnel', () => {
     const tunnel = new QuickTunnel('cloudflared', spawn);
     const started = tunnel.start('http://127.0.0.1:12345', loss);
     child.stdout.write('https://first.trycloudflare.com\n');
+    child.stderr.write('INF Registered tunnel connection connIndex=0\n');
     await started;
     child.stdout.write('https://second.trycloudflare.com\n');
     expect(loss).toHaveBeenCalledOnce();
@@ -76,5 +78,24 @@ describe('owned Quick Tunnel', () => {
       new QuickTunnel('cloudflared', spawn).start('http://example.com:12345', vi.fn()),
     ).rejects.toThrow();
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('does not report a hostname as ready before a registered edge connection', async () => {
+    const { child, spawn } = fixture();
+    const tunnel = new QuickTunnel('cloudflared', spawn, 20);
+    const started = tunnel.start('http://127.0.0.1:12345', vi.fn());
+    child.stdout.write('https://not-connected.trycloudflare.com\n');
+    await expect(started).rejects.toThrow('tunnel_unavailable');
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it('accepts connection-before-hostname ordering without confusing it with public reachability', async () => {
+    const { child, spawn } = fixture();
+    const tunnel = new QuickTunnel('cloudflared', spawn);
+    const started = tunnel.start('http://127.0.0.1:12345', vi.fn());
+    child.stderr.write('INF Registered tunnel connection connIndex=0\n');
+    child.stdout.write('https://connected.trycloudflare.com\n');
+    expect(await started).toBe('https://connected.trycloudflare.com');
+    await tunnel.close();
   });
 });

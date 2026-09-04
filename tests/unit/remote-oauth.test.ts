@@ -55,6 +55,33 @@ function setup() {
 }
 
 describe('ephemeral operator OAuth', () => {
+  it('negotiates code-only registration without granting refresh-token access', () => {
+    const { oauth } = setup();
+    const metadata = { redirect_uris: [redirectUri], token_endpoint_auth_method: 'none' };
+    const client = oauth.register({
+      ...metadata,
+      grant_types: ['authorization_code', 'refresh_token'],
+    });
+    expect(client.grant_types).toEqual(['authorization_code']);
+    expect(oauth.metadata().grant_types_supported).toEqual(['authorization_code']);
+    expect(() =>
+      oauth.exchange(
+        new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: client.client_id,
+          refresh_token: 'unused',
+        }),
+      ),
+    ).toThrow();
+    for (const grant_types of [
+      ['refresh_token'],
+      ['client_credentials'],
+      ['authorization_code', 'authorization_code'],
+    ]) {
+      expect(() => oauth.register({ ...metadata, grant_types })).toThrow();
+    }
+  });
+
   it('requires local approval, delivers one code once, and never grants by public request id', () => {
     const { oauth, authorize } = setup();
     const pending = authorize();

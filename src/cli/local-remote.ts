@@ -39,6 +39,7 @@ async function serveRemote(
     taskId: options.task,
     ...workspace,
     redirectUri: options.redirectUri,
+    onDiagnostic: (event) => console.log(JSON.stringify({ remote: event })),
     onAuthorization: (request) => {
       console.log(
         JSON.stringify({

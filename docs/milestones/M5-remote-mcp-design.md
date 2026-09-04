@@ -71,4 +71,12 @@ cloudflared `2026.8.3` was obtained from the official Cloudflare GitHub release 
 
 Actual Quick Tunnel attempts produced temporary hostnames, but HTTPS discovery from this machine failed with `ECONNRESET` in Node; a separate Windows HTTP probe failed with `WebException`. No authenticated public MCP round trip was established. The external web probe declined to open the temporary URL, so it supplies no independent reachability evidence. Only synthetic non-repository data was configured for these probes, with no real ChatGPT account grant. Each probe closed its service/tunnel. Results remain in gitignored local smoke records.
 
-Remaining gate: establish a usable network path, then verify the real ChatGPT connection, human local authorization and LOCAL planning/review loop against a non-sensitive acceptance task. Do not freeze M5 or integrate it as a completed remote milestone before that evidence exists.
+Follow-up on 2026-09-04: the user has no local proxy. A direct probe subsequently received HTTP 200 for public OAuth discovery, and the real ChatGPT create-app UI discovered this service's endpoints and scope. Connectivity is therefore possible without a proxy, although local probes still saw intermittent resets. Startup now waits for a registered tunnel connection as well as its hostname.
+
+The dedicated generated fixture `m5-live-20260904` was initialized once and reused across service restarts. Redacted HTTP diagnostics established that ChatGPT reached discovery (200), was challenged before MCP access (401), and failed DCR registration (400) specifically on `grant_types`. The implementation now negotiates code-plus-refresh registration requests to an explicit code-only response under RFC 7591; refresh issuance/exchange remains disabled. Diagnostics record only fixed categories, status codes and allowlisted field names. No real OAuth request has been approved by the agent.
+
+After that fix, the same fixture's real ChatGPT DCR returned HTTP 201 and the UI created `Codex Duet M5 验收` (development app `asdk_app_6a9a3fd6776c8191a27837bfa7a912d6`) and displayed its OAuth login entry. This confirms registration interoperability, not authenticated MCP reads.
+
+Follow-up validation passed: typecheck, lint, build, touched-source formatting, whitespace check and a complete serial regression run of **53 files, 531 passed, one platform skip (532 total)**. Added cases cover registration negotiation without refresh access, redacted diagnostics and readiness ordering.
+
+Remaining gate: human local authorization and the real LOCAL planning/review loop against this non-sensitive acceptance task. Do not freeze M5 or integrate it as a completed remote milestone before that evidence exists.

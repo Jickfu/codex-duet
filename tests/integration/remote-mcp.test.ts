@@ -12,10 +12,12 @@ afterEach(async () => {
 });
 
 async function setup() {
+  const diagnostic = vi.fn();
   const workspaceInfo = vi.fn(async (input) => input);
   let pending = '';
   const server = new RemoteMcpServer({
     taskId: 'demo',
+    onDiagnostic: diagnostic,
     redirectUri,
     workspace: { workspaceInfo } as never,
     authorizeSnapshot: async (id) => id === snapshotId,
@@ -95,10 +97,34 @@ async function setup() {
     expect(exchange.status).toBe(200);
     return JSON.parse(exchange.text).access_token as string;
   };
-  return { server, send, token, workspaceInfo };
+  return { server, send, token, workspaceInfo, diagnostic };
 }
 
 describe('authenticated JSON MCP boundary', () => {
+  it('reports bounded diagnostics without request secrets and tolerates callback failures', async () => {
+    const { server, send, diagnostic } = await setup();
+    server.activate(origin);
+    await send('/oauth/register?secret=private', 'POST', '{"client_secret":"private"}', {
+      'content-type': 'application/json',
+      authorization: 'Bearer private',
+    });
+    await send('/private-path?code=private');
+    expect(diagnostic.mock.calls).toEqual([
+      [
+        {
+          endpoint: 'register',
+          status: 400,
+          invalidFields: ['redirect_uris', 'token_endpoint_auth_method'],
+        },
+      ],
+      [{ endpoint: 'other', status: 404 }],
+    ]);
+    diagnostic.mockImplementation(() => {
+      throw new Error('observer failure');
+    });
+    expect((await send('/.well-known/oauth-authorization-server')).status).toBe(200);
+  });
+
   it('fails closed until pinned, challenges before data, and ignores forwarded authority', async () => {
     const { server, send, workspaceInfo } = await setup();
     expect((await send('/mcp')).status).toBe(503);

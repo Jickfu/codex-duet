@@ -14,6 +14,11 @@ export type RemoteServerOptions = {
   workspace: LocalWorkspaceService;
   redirectUri: string;
   authorizeSnapshot(snapshotId: string, iteration?: number): Promise<boolean>;
+  onDiagnostic?(event: {
+    endpoint: 'register' | 'authorize' | 'token' | 'mcp' | 'discovery' | 'other';
+    status: number;
+    invalidFields?: string[];
+  }): void;
   onAuthorization(request: {
     id: string;
     clientId: string;
@@ -93,6 +98,34 @@ export class RemoteMcpServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    let invalidFields: string[] | undefined;
+    // Never log query strings, credentials, client metadata or arbitrary paths.
+    const path = request.url?.split('?')[0];
+    const endpoint =
+      path === '/oauth/register'
+        ? 'register'
+        : path === '/oauth/authorize'
+          ? 'authorize'
+          : path === '/oauth/token'
+            ? 'token'
+            : path === '/mcp'
+              ? 'mcp'
+              : path === '/.well-known/oauth-authorization-server' ||
+                  path === '/.well-known/oauth-protected-resource' ||
+                  path === '/.well-known/oauth-protected-resource/mcp'
+                ? 'discovery'
+                : 'other';
+    response.once('finish', () => {
+      try {
+        this.options.onDiagnostic?.({
+          endpoint,
+          status: response.statusCode,
+          ...(invalidFields ? { invalidFields } : {}),
+        });
+      } catch {
+        /* Diagnostics must not affect request handling. */
+      }
+    });
     response.setHeader('cache-control', 'no-store');
     response.setHeader('referrer-policy', 'no-referrer');
     response.setHeader('x-content-type-options', 'nosniff');
@@ -187,6 +220,18 @@ export class RemoteMcpServer {
         throw new OAuthFailure('invalid_request');
       await this.dispatch(request, response, input, oauth);
     } catch (error) {
+      if (endpoint === 'register' && error instanceof z.ZodError) {
+        const allowed = [
+          'redirect_uris',
+          'token_endpoint_auth_method',
+          'grant_types',
+          'response_types',
+          'client_name',
+        ];
+        invalidFields = allowed.filter((field) =>
+          error.issues.some((issue) => issue.path[0] === field),
+        );
+      }
       if (response.headersSent) {
         response.destroy();
         return;

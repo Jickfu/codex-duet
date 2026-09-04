@@ -86,7 +86,17 @@ export class RemoteOAuth {
       .object({
         redirect_uris: z.array(z.literal(this.redirectUri)).length(1),
         token_endpoint_auth_method: z.literal('none'),
-        grant_types: z.array(z.literal('authorization_code')).length(1).optional(),
+        // DCR requests are preferences: return the supported subset explicitly
+        // (RFC 7591 section 3.2.1). This never enables refresh-token exchange.
+        grant_types: z
+          .array(z.enum(['authorization_code', 'refresh_token']))
+          .min(1)
+          .max(2)
+          .refine(
+            (grants) =>
+              grants.includes('authorization_code') && new Set(grants).size === grants.length,
+          )
+          .optional(),
         response_types: z.array(z.literal('code')).length(1).optional(),
         client_name: z.string().max(128).optional(),
       })

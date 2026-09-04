@@ -36,6 +36,10 @@ Development bounds: 32 TCP connections, eight active requests, 120 requests per 
 
 Tokens and code lookup keys are digested in memory. No OAuth payloads, cloudflared logs, source bodies or credentials are logged by this service. The authorization-result ticket is only a retrieval handle, not local approval authority; responses use no-store and no-referrer policies. Existing snapshot filename/location exclusions still apply and are not a general content secret scanner.
 
+Startup waits for both the temporary hostname and cloudflared's registered-connection event; a hostname alone does not establish tunnel readiness. This does not guarantee public HTTPS reachability. Terminal diagnostics contain only a fixed endpoint category, HTTP status and allowlisted invalid registration field names, never request values or arbitrary paths. Observer failures do not affect requests.
+
+DCR can negotiate a request containing both `authorization_code` and `refresh_token` down to `authorization_code`, returning that supported subset explicitly under [RFC 7591 section 3.2.1](https://www.rfc-editor.org/rfc/rfc7591.html#section-3.2.1). Refresh tokens remain unsupported at the token endpoint and are never issued. A refresh-only or unrelated grant request is rejected.
+
 ## Acceptance still required
 
 Local tests cover the OAuth and JSON MCP exchange, isolation, immutable real-Git reads and supervisor cleanup. They cannot prove that the user's ChatGPT account accepts this client configuration or that the selected network carries the tunnel. Real acceptance must use a non-sensitive fixture task and verify ChatGPT tool discovery/reads, the Browser planning/review loop and explicit shutdown. Do not mark M5 frozen before that evidence exists.

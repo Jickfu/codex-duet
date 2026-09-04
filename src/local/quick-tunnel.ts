@@ -47,6 +47,7 @@ export class QuickTunnel {
       resolveExit = resolve;
     });
     let origin: string | undefined;
+    let registered = false;
     let rejectReady!: (reason: Error) => void;
     const failure = () => {
       rejectReady(new OAuthFailure('tunnel_unavailable', 503));
@@ -56,6 +57,12 @@ export class QuickTunnel {
       return await new Promise<string>((resolve, reject) => {
         rejectReady = reject;
         const timer = setTimeout(failure, this.startupTimeout);
+        const ready = () => {
+          if (origin && registered && !didExit && !this.stopping) {
+            clearTimeout(timer);
+            resolve(origin);
+          }
+        };
         const exit = () => {
           if (didExit) return;
           didExit = true;
@@ -74,6 +81,10 @@ export class QuickTunnel {
             for (const char of chunk.toString('utf8')) {
               if (char === '\n') {
                 if (!discard) {
+                  if (/(?:^|\s)INF Registered tunnel connection(?:\s|$)/.test(buffered)) {
+                    registered = true;
+                    ready();
+                  }
                   const match = buffered.match(
                     /https:\/\/([a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com)(?=[\s|]|$)/,
                   );
@@ -82,8 +93,7 @@ export class QuickTunnel {
                     if (origin && origin !== candidate) failure();
                     else if (!origin) {
                       origin = candidate;
-                      clearTimeout(timer);
-                      resolve(origin);
+                      ready();
                     }
                   }
                 }

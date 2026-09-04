@@ -107,9 +107,14 @@ assert.deepEqual(
   [...currentFiles].sort(),
 );
 for (const name of currentFiles) {
-  assert.deepEqual(
-    await readFile(path.join(root, 'dist', name)),
-    await readFile(path.join(installed, 'node_modules/codex-duet/dist', name)),
+  // TypeScript preserves checkout newlines inside multiline script literals.
+  // Normalize only physical CRLF; escaped characters and all other bytes still differ.
+  assert.equal(
+    (await readFile(path.join(root, 'dist', name), 'utf8')).replaceAll('\r\n', '\n'),
+    (await readFile(path.join(installed, 'node_modules/codex-duet/dist', name), 'utf8')).replaceAll(
+      '\r\n',
+      '\n',
+    ),
     `Stale bundled runtime: ${name}`,
   );
 }

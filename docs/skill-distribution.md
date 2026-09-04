@@ -30,3 +30,7 @@ git -c core.autocrlf=false archive --format=zip --prefix=codex-duet/ --output=sk
 ```
 
 Commit the ZIP together with its validation record. Refresh it whenever any file in the distribution folder changes. The ZIP contains only that folder, without repository source, dependencies, browser data or task evidence. Verify its entry set and extracted bytes against `git ls-tree` / `git show` for the chosen skill tree; do not infer ZIP freshness from its filename or package version.
+
+## Project-local installation
+
+The bilingual repository READMEs route installation requests to [the executable installation procedure](../INSTALL.md). The bundle now includes `install:project`, which copies the complete distribution to an explicitly named project and verifies doctor. [M6.5](milestones/M6-project-skill-install.md) records the project-scoped installation, conflict/preservation checks and real GitHub-download acceptance.

@@ -14,7 +14,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  regression:
+    name: Regression (${{ matrix.os }}, Node 24)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@11.17.0
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: npm run build
+      - name: Install Chromium for local fixture tests
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run the complete regression suite serially
+        run: npm test -- --maxWorkers=1 --no-file-parallelism --reporter=default --reporter=junit --outputFile.junit=.chatbridge/ci-tests.xml
+      - name: Preserve regression report even on test failure
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: regression-${{ matrix.os }}-node24-${{ github.sha }}
+          path: .chatbridge/ci-tests.xml
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
   package:
+    needs: regression
     name: Package (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15

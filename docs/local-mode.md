@@ -2,7 +2,7 @@
 
 M5 extension: an explicitly authorized, unsent CODEX_BROWSER Reviewer can move to a known stable conversation using `local reviewer-handoff --task <id> --from <url> --to <url> --reason <text>`. The command preserves the exact control and lifecycle, records both bindings before switching, and never sends. An interrupted handoff must be recovered with identical arguments before ordinary Browser operations continue. See [ADR-028](adr/ADR-028-local-reviewer-conversation-handoff.md) for eligibility and bootstrap boundaries.
 
-Status: **M4 FROZEN — LOCALLY TESTABLE SCOPE; M5 DEVELOPMENT**. See the [freeze and acceptance record](milestones/M4-local-readonly-mcp.md) and [M5 remote setup](remote-local-mode.md).
+Status: **M4 FROZEN — LOCALLY TESTABLE SCOPE; M5 FROZEN — SINGLE-USER REMOTE DEVELOPMENT SCOPE**. See the [freeze and acceptance record](milestones/M4-local-readonly-mcp.md) and [M5 remote setup](remote-local-mode.md).
 
 LOCAL mode is for private, unpushed, or uncommitted Git workspaces. It preserves Codex as the sole Executor. Immutable snapshots, bounded snapshot-bound reads, a loopback MCP server library, capability-scoped response ingress, guarded lifecycle, both selected Browser providers and optional Discussion are implemented. M4 acceptance is local/fixture-based. The separate M5 development entry point is `local remote-serve`; a [generated-task real ChatGPT loop](milestones/M5-live-acceptance-2026-09-04.md) reached DONE with bounded format repair and an authorized conversation handoff. The remaining sections describe the frozen M4 foundation unless noted otherwise.
 

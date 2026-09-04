@@ -1,6 +1,6 @@
 # LOCAL remote development mode (M5)
 
-Status: local validation and a generated-task real ChatGPT planning/execution/review loop passed, using bounded format repair and an authorized conversation handoff. M5 remains development, not frozen or integrated. This single-user path needs no domain or external identity provider. It uses a temporary Cloudflare Quick Tunnel, JSON MCP responses and a local OAuth approval step. See the [live acceptance record](milestones/M5-live-acceptance-2026-09-04.md).
+Status: local validation and a generated-task real ChatGPT planning/execution/review loop passed, using bounded format repair and an authorized conversation handoff. M5 is [frozen for this single-user development scope](milestones/M5-remote-development-freeze.md). This single-user path needs no domain or external identity provider. It uses a temporary Cloudflare Quick Tunnel, JSON MCP responses and a local OAuth approval step. See the [live acceptance record](milestones/M5-live-acceptance-2026-09-04.md).
 
 ## Start and connect
 
@@ -40,8 +40,8 @@ Startup waits for both the temporary hostname and cloudflared's registered-conne
 
 DCR can negotiate a request containing both `authorization_code` and `refresh_token` down to `authorization_code`, returning that supported subset explicitly under [RFC 7591 section 3.2.1](https://www.rfc-editor.org/rfc/rfc7591.html#section-3.2.1). Refresh tokens remain unsupported at the token endpoint and are never issued. A refresh-only or unrelated grant request is rejected.
 
-## Acceptance still required
+## Acceptance scope
 
-Local tests cover the OAuth and JSON MCP exchange, isolation, immutable real-Git reads and supervisor cleanup. They cannot prove that the user's ChatGPT account accepts this client configuration or that the selected network carries the tunnel. Real acceptance must use a non-sensitive fixture task and verify ChatGPT tool discovery/reads, the Browser planning/review loop and explicit shutdown. Do not mark M5 frozen before that evidence exists.
+Local tests cover OAuth and JSON MCP exchange, isolation, immutable real-Git reads and supervisor cleanup. The linked live record separately verifies app discovery, authenticated snapshot reads, the Browser planning/review loop and explicit shutdown for one non-sensitive task. This evidence does not establish production availability or interoperability across all accounts, providers and networks.
 
 Sources checked on 2026-09-04: [OpenAI authentication](https://developers.openai.com/plugins/build/auth), [MCP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports), [Cloudflare Quick Tunnel limitations](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/).

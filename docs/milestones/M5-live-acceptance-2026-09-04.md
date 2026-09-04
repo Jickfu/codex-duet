@@ -1,6 +1,6 @@
 # M5 live acceptance — 2026-09-04
 
-Status: real generated-task LOCAL end-to-end acceptance completed through DONE, including bounded format repair and an explicitly authorized conversation handoff. Temporary service stopped cleanly. M5 remains development, not frozen or integrated; the chronological failures below are preserved as evidence.
+Status: real generated-task LOCAL end-to-end acceptance completed through DONE, including bounded format repair and an explicitly authorized conversation handoff. Temporary service stopped cleanly. The [M5 freeze record](M5-remote-development-freeze.md) defines the accepted development scope; the chronological failures below are preserved as evidence.
 
 ## Environment and authorization
 

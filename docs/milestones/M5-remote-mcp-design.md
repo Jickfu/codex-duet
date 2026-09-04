@@ -80,3 +80,5 @@ After that fix, the same fixture's real ChatGPT DCR returned HTTP 201 and the UI
 Follow-up validation passed: typecheck, lint, build, touched-source formatting, whitespace check and a complete serial regression run of **53 files, 531 passed, one platform skip (532 total)**. Added cases cover registration negotiation without refresh access, redacted diagnostics and readiness ordering.
 
 Remaining gate: human local authorization and the real LOCAL planning/review loop against this non-sensitive acceptance task. Do not freeze M5 or integrate it as a completed remote milestone before that evidence exists.
+
+Subsequent live result: the user approved the exact pending request; OAuth token exchange and ChatGPT connection succeeded. The first real Planner exchange returned malformed JSON and was refused by lifecycle ingress. Source remains untouched and the service was stopped. See the [live acceptance record](M5-live-acceptance-2026-09-04.md) for immutable identities, failure evidence and the required format-repair design decision. Human authorization is complete for that stopped service lifetime; the full loop remains unaccepted.

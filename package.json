@@ -14,6 +14,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node scripts/build-package.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

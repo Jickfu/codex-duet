@@ -33,6 +33,8 @@ pnpm build
 pnpm link --global
 ```
 
+Installation checks, verified tarballs and evidence-preserving recovery are documented in [installation and recovery](docs/installation-and-recovery.md). Run `chatbridge doctor` for an offline prerequisite check before browser or remote setup.
+
 ## Recommended: Extension Existing Session
 
 Install and enable the official Playwright Extension in everyday Chrome or Edge, keep the existing ChatGPT tab logged in, then run `chatbridge browser doctor` and `chatbridge browser attach`. This reuses tabs, cookies, SSO/2FA, and login state without creating a second profile or downloading Chromium. The official Agent CLI is pinned as a dependency; codex-duet never uses runtime `npx` downloads.

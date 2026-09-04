@@ -71,24 +71,24 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 
 ## Current and planned status
 
-| Component                                          | Status                                          |
-| -------------------------------------------------- | ----------------------------------------------- |
-| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0**                     |
-| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1**                     |
-| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2**                     |
-| Codex Skill and single-round durable orchestration | **FROZEN M3.0**                                 |
-| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**                      |
-| Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**                     |
-| `EXECUTING` crash reconciliation                   | **M3.2b FROZEN / REAL DESKTOP CRASH E2E PASS**  |
-| Compact C2C and durable TaskSpec                   | **M3.2c FROZEN / REAL DESKTOP E2E PASS**        |
-| Immutable interaction policy and Discussion        | **M3.3 FROZEN / REAL DESKTOP E2E PASS**         |
-| `LocalCodeProvider` and Local read-only MCP Bridge | **IMPLEMENTED M4 / LOCAL ACCEPTANCE**           |
-| `submit_response` MCP return path                  | **IMPLEMENTED / EXPLICIT CAPABILITY REQUIRED**  |
-| LOCAL review snapshot/fingerprint contract         | **IMPLEMENTED M4 / SEPARATE LOCAL AUTHORITY**   |
-| cloudflared lifecycle and remote MCP exposure      | **M5 DEVELOPMENT / CHATGPT ACCEPTANCE PENDING** |
-| Hardening, packaging, and distribution             | **PLANNED M6**                                  |
+| Component                                          | Status                                         |
+| -------------------------------------------------- | ---------------------------------------------- |
+| C2C protocol and state machine                     | **IMPLEMENTED / FROZEN M0**                    |
+| Browser Bridge / `send` and deterministic `wait`   | **IMPLEMENTED / FROZEN M1**                    |
+| `GitHubCodeProvider` and safe Git workflow         | **IMPLEMENTED / FROZEN M2**                    |
+| Codex Skill and single-round durable orchestration | **FROZEN M3.0**                                |
+| Automatic multi-round Review/Fix Loop              | **FROZEN M3.1 / E2E PASS**                     |
+| Task-scoped ChatGPT conversation binding           | **FROZEN M3.2a / E2E PASS**                    |
+| `EXECUTING` crash reconciliation                   | **M3.2b FROZEN / REAL DESKTOP CRASH E2E PASS** |
+| Compact C2C and durable TaskSpec                   | **M3.2c FROZEN / REAL DESKTOP E2E PASS**       |
+| Immutable interaction policy and Discussion        | **M3.3 FROZEN / REAL DESKTOP E2E PASS**        |
+| `LocalCodeProvider` and Local read-only MCP Bridge | **IMPLEMENTED M4 / LOCAL ACCEPTANCE**          |
+| `submit_response` MCP return path                  | **IMPLEMENTED / EXPLICIT CAPABILITY REQUIRED** |
+| LOCAL review snapshot/fingerprint contract         | **IMPLEMENTED M4 / SEPARATE LOCAL AUTHORITY**  |
+| cloudflared lifecycle and remote MCP exposure      | **M5 FROZEN / REMOTE DEVELOPMENT ACCEPTANCE**  |
+| Hardening, packaging, and distribution             | **M6.1 VALIDATED / M6 OPEN**                   |
 
-M3 is frozen with real Desktop E2E acceptance. M4's locally testable data plane and lifecycle are frozen; its Browser acceptance uses fixtures. M5 adds a separate authenticated foreground service and owned temporary tunnel; real ChatGPT LOCAL E2E remains pending. See [remote development setup](remote-local-mode.md). M4 does not claim production remote access or an independent external review. See the [M4 freeze record](milestones/M4-local-readonly-mcp.md).
+M3 is frozen with real Desktop E2E acceptance. M4's locally testable data plane and lifecycle are frozen; its Browser acceptance uses fixtures. M5 adds a separate authenticated foreground service and owned temporary tunnel; a generated-task real ChatGPT LOCAL loop reached DONE; the single-user development scope is frozen. See [remote development setup](remote-local-mode.md). M4 does not claim production remote access or an independent external review. See the [M4 freeze record](milestones/M4-local-readonly-mcp.md).
 
 ## Roadmap ownership
 

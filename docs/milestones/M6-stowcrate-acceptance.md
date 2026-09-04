@@ -22,7 +22,7 @@ The published repository ZIP was downloaded from `main`, extracted outside the t
 - Branch: `agent/task-stowcrate-duet-guide-20260904`, pushed and verified by GitHubCodeProvider.
 - Planner and Reviewer each used prepare → ATTEMPTED → one Send → CONFIRMED → RESPONDED → ACCEPTED. The Reviewer returned `DONE` in iteration 1; durable task state is `DONE`.
 - Reviewer response SHA-256: `ba7b1944caa4a117f57d74df5b60c91d0e8760ce79f9a47777589cd6085272f8`.
-- Local immutable evidence remains under the acceptance worktree's `.chatbridge/runs/stowcrate-duet-guide-20260904/`; input captures and validation notes remain in `.chatbridge/acceptance-input/`.
+- Local evidence was originally stored in the acceptance worktree's `.chatbridge/`; after the authorized cleanup below, the preserved copy is in this repository's `.chatbridge/stowcrate-acceptance-archive/`.
 
 ## Exact-commit validation
 
@@ -34,4 +34,10 @@ The first TaskSpec candidate hashed an in-memory LF request before Python wrote 
 
 An unbound Chrome tab lost its control connection before sending. A fresh tab in the same provider restored access; the eventual stable conversation was retained for both exchanges. During review composition, plain-text input produced doubled line breaks. Clipboard readback detected this before ATTEMPTED; a supported clipboard preformatted paste preserved the exact envelope. No ambiguous send was retried, and no bound conversation or provider was changed.
 
-This verifies installation from the repository ZIP and one complete GITHUB task on the actual user's existing project/account. It is not an independent new user's usability study, a LOCAL acceptance, a multi-round correction test, or evidence that every host can connect. StowCrate setup and task branches remain separate from its main branch. No npm publication, GitHub Release, PR or merge was performed by this acceptance.
+This verifies installation from the repository ZIP and one complete GITHUB task on the actual user's existing project/account. It is not an independent new user's usability study, a LOCAL acceptance, a multi-round correction test, or evidence that every host can connect. No npm publication, GitHub Release, PR or merge was performed by this acceptance.
+
+## Authorized cleanup and scope closeout
+
+The user subsequently requested deletion of all acceptance changes, installed skill and created StowCrate branches. Both local and remote branches `codex/duet-acceptance-setup` and `agent/task-stowcrate-duet-guide-20260904` were deleted, and the isolated acceptance worktree was removed with its installed dependencies and guide. StowCrate main remained at `27fbd057a789863d0c48a66ef84a0f9e1a5baec3`, clean, with no installed codex-duet skill. No acceptance changes were merged into main. Historical SHA links above record the reviewed identity; remote retention after branch deletion is not guaranteed.
+
+The evidence directory was copied into codex-duet before worktree removal. M6's selected repository-folder/ZIP delivery scope is accepted: distribution, bilingual documentation, executable project-local installation, first-use checks, hosted validation and real GITHUB acceptance are complete. Broader production deployment, independent usability studies and additional distribution channels are future scope, not unfinished requirements of this delivery.

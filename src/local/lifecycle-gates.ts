@@ -14,6 +14,7 @@ import { LocalSnapshotStore } from './snapshot-store.js';
 import { LocalTaskSpecStore, assertLocalContracts, type LocalTaskSpecV1 } from './task-spec.js';
 import { LocalDiscussion } from './discussion.js';
 import { localBrowserRecord, localBrowserResponsePath } from './browser-evidence.js';
+import { LocalFormatRepair } from './format-repair.js';
 
 export class StoredLocalLifecycleGates implements LocalLifecycleGates {
   constructor(private readonly root: string) {}
@@ -143,7 +144,16 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
     // Capability-authenticated MCP wiring is not exposed by this adapter yet.
     if (request.source !== 'BROWSER') this.denied('LOCAL_MCP_INGRESS_NOT_CONFIGURED');
     const envelope = parseEnvelope(request.response);
-    await this.assertControlConfirmed(request.taskId, request.controlSha256, policy, {
+    const repair =
+      policy.browserControlProvider === 'CODEX_BROWSER'
+        ? await new LocalFormatRepair(this.root).responseControl(
+            request.taskId,
+            request.controlSha256,
+            request.response,
+          )
+        : undefined;
+    const transportDigest = repair ? sha256(repair) : request.controlSha256;
+    await this.assertControlConfirmed(request.taskId, transportDigest, policy, {
       kind: envelope.testStatus === undefined ? 'PLANNER' : 'REVIEWER',
       iteration: request.iteration,
     });
@@ -155,7 +165,7 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
     if (
       !record ||
       record.operation.state !== 'RESPONDED' ||
-      record.operation.outboundSha256 !== request.controlSha256 ||
+      record.operation.outboundSha256 !== transportDigest ||
       record.operation.iteration !== request.iteration ||
       record.operation.inboundSha256 !== sha256(request.response)
     )

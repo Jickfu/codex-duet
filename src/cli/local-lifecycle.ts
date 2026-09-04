@@ -47,6 +47,19 @@ export function registerLocalLifecycleCommands(
     };
   }
   local
+    .command('format-repair-prepare')
+    .description(
+      'Prepare at most two lossless JSON format repairs for a rejected CODEX_BROWSER reply; never sends',
+    )
+    .requiredOption('--task <id>')
+    .requiredOption('--attempt <n>')
+    .requiredOption('--message-file <path>')
+    .action(async (o: { task: string; attempt: string; messageFile: string }) => {
+      const { taskId, lifecycle } = await runtime(o.task);
+      const response = await readFile(path.resolve(cwd(), o.messageFile), 'utf8');
+      report(await lifecycle.prepareFormatRepair(taskId, Number(o.attempt), response));
+    });
+  local
     .command('discussion-prepare')
     .description('Prepare or recover one explicit LOCAL Discussion round; never sends')
     .requiredOption('--task <id>')

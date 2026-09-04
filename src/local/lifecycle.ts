@@ -19,6 +19,7 @@ import {
   validateLocalReviewTargetIntegrity,
 } from './domain.js';
 import { localControlEnvelope, validateLocalControlResponse } from './control-projection.js';
+import { LocalFormatRepair } from './format-repair.js';
 import { LocalTaskSpecV1Schema, validateLocalTaskSpec, type LocalTaskSpecV1 } from './task-spec.js';
 import type { LocalCodeProvider, LocalSnapshotAuthority } from './local-code-provider.js';
 import {
@@ -198,6 +199,16 @@ export class LocalLifecycle {
       run.state = 'EXECUTING';
       await this.write(run);
       return run;
+    });
+  }
+
+  async prepareFormatRepair(taskId: string, attempt: number, rejectedResponse: string) {
+    return this.lock.withLock(taskId, async () => {
+      const run = await this.status(taskId);
+      await this.snapshots.assertLiveSnapshot(
+        run.reviews.at(-1)?.reviewSnapshotId ?? run.spec.context.baselineSnapshotId,
+      );
+      return new LocalFormatRepair(this.root).prepare(run, attempt, rejectedResponse);
     });
   }
 

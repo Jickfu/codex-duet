@@ -44,3 +44,13 @@ The existing immutable Browser operation cannot receive a different reply under 
 Proposed next scope: an explicit, bounded format-repair interaction attached to the same task, original control digest and rejected response digest. Preserve both original artifacts; record each new send and response independently; accept only a valid response with unchanged semantic identity. Do not grant execution or reset the lifecycle before valid acceptance. Define provider behavior and retry exhaustion before implementation; this touches the frozen control/evidence boundary and is not a remote-server compatibility tweak.
 
 Remaining acceptance: valid Planner ingress, executor-only fixture change, exact snapshot/test evidence, real remote Reviewer ingress and complete lifecycle shutdown. The successful OAuth/MCP connection is not evidence that these remaining gates passed.
+
+## Authorized format-repair follow-up
+
+The user approved the bounded format-repair recommendation. [ADR-027](../adr/ADR-027-local-format-repair.md) defines the conservative CODEX_BROWSER implementation and unchanged-content check. The first correction was sent once in the original conversation, with repair operation `85b127372ae3a80dd6e15b55f5ca6812d946df42ca9a3ff1c8f70e48944276b0` and outbound SHA-256 `bd338afe238dda4142aa86812a82fcf4a10be3aa40b6b11bd6ee6c9b68fd4402`.
+
+ChatGPT returned a protocol code block with valid quote escaping. The block text was saved unchanged; its SHA-256 is `7ebac82b22edbcd4a308e74a92aa85cdc94d93f470d55a92773673b782961ba0`. The decoded result matched the rejected reply character for character. The repaired Browser proof was independently recorded, and standard lifecycle ingress returned ACCEPTED for the original control at `2026-09-04T04:12:46.073Z`. The original malformed reply was not replaced.
+
+After begin-execution, only generated `greeting.mjs` changed to append one exclamation mark. The unchanged `node test.mjs` printed PASS and exited zero; diff whitespace validation passed. Snapshot `e742ec2c93b6144c52ceee47142b2266b0a1e14fbaf203c3ed36b5b4b3acc99d` received exact test/execution evidence and was formally prepared for review. Lifecycle is now EXECUTED, iteration 1, confirmed=false. Real remote Reviewer acceptance remains pending reconnection to a new service lifetime.
+
+Implementation validation: typecheck, lint, build and the complete serial suite passed: **54 files, 536 passed, one platform skip (537 total)**. The live first-attempt repair also passed. Broader ambiguous syntax and PLAYWRIGHT_CLI format repair are not claimed.

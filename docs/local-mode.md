@@ -109,6 +109,10 @@ An ATTEMPTED sidecar means a send may have occurred: stop and inspect, never del
 
 The default Browser CLI ingress refuses new MCP-source responses. Explicitly enabled loopback servers can use the authenticated [MCP lifecycle adapter](adr/ADR-024-local-mcp-lifecycle-ingress.md): capabilities do not bypass confirmed Browser send, identity, state or live-snapshot guards. Accepted MCP replies leave Browser state truthful; only an exact ACCEPTED receipt permits the next control without inventing a Browser response. Real remote LOCAL Browser E2E remains M5.
 
+### Bounded format repair
+
+Malformed CODEX_BROWSER replies with losslessly identifiable JSON quoting errors can use the additive [format-repair flow](adr/ADR-027-local-format-repair.md). It preserves original artifacts and permits at most two separately evidenced corrections. It does not repair replies locally or bypass lifecycle gates. Other malformed or ambiguous replies remain rejected.
+
 ### Explicit loopback library composition
 
 M4 exposes a server library, not a server-management daemon or automatic startup. After building, an operator-owned Node entry point can compose the read-only server as follows:

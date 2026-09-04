@@ -15,3 +15,5 @@ All 12 jobs passed for `36a8745974f2a80681a05df88f1c6b1835df543b`, [Actions run 
 Downloaded reports confirm 555 passed on Linux/macOS, and 554 passed with one platform skip on Windows. All nine package/skill jobs passed. This closeout changes only documentation and skips duplicate CI; application, workflow and archive bytes remain the tested ref.
 
 The new-user live Planner→Executor→Reviewer acceptance is not completed by this increment. It requires a chosen target project, selected mode and actual account/browser access. The earlier generated-task M5 acceptance remains its own evidence and is not relabeled as a fresh-user installation acceptance. No Browser messages or OAuth approvals were performed here.
+
+The subsequent [StowCrate live acceptance](M6-stowcrate-acceptance.md) completed repository-ZIP installation and one real GITHUB Planner→Executor→Reviewer task on the user's existing project/account. This separate evidence does not change the local-only scope of onboarding or claim an independent new-user study.

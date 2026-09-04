@@ -23,9 +23,22 @@ LOCAL mode  → Read-only MCP Data Plane (frozen local M4; remote M5 development
 
 GITHUB mode is implemented and frozen at M2. M3.0 through M3.3 are frozen with real Desktop E2E acceptance. M3.3 adds an immutable per-task Browser provider choice and optional bounded Discussion. M4 adds separate LOCAL snapshot/review authority without requiring a commit, push or remote; its disabled-by-default `submit_response` needs an exact control-scoped capability. Recovery does not claim exactly-once arbitrary external effects. Both modes share C2C, state transitions and response ingress. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), [the M3 milestone](docs/milestones/M3-durable-orchestrator.md), and [LOCAL mode](docs/local-mode.md).
 
-## Install
+## Install the downloadable skill (recommended)
 
-Requirements: Node.js 20 or newer and pnpm.
+Download this repository as a ZIP and extract **`skill/codex-duet`**, including its assets and scripts. The [skill folder](skill/codex-duet) contains `SKILL.md`, the workflow reference and a precompiled runtime tarball. Follow [the installation guide](skill/codex-duet/INSTALL.md). Node 20+, npm and Git are required; no source build or global installation is needed. The bundled codex-duet runtime is installed from a local file; its dependencies still require registry access. Nothing is published to npm.
+
+Inside the downloaded skill directory:
+
+```text
+npm run setup
+node scripts/chatbridge.mjs doctor
+```
+
+Ask Codex to use that directory's `SKILL.md`. Run task commands from your target project's root using `node "<absolute-skill-directory>/scripts/chatbridge.mjs" ...`. The current skill recipe orchestrates GITHUB tasks; the runtime also includes the documented LOCAL commands. Setup does not authorize task initialization, Git pushes or Browser sends.
+
+## Build from source
+
+Requirements: Node.js >=22.13 for pnpm 11; installed runtime supports Node >=20.
 
 ```text
 pnpm install

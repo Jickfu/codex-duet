@@ -5,6 +5,12 @@ description: Orchestrate a GitHub-mode task through ChatGPT Web planning and rev
 
 # Codex Duet
 
+## Runtime and workspace
+
+For the downloadable skill bundle, first follow [installation](INSTALL.md): `npm run setup` inside the skill directory verifies and installs the bundled runtime. Run `node "<absolute-skill-directory>/scripts/chatbridge.mjs" doctor`. In every command below and in the workflow reference, replace `chatbridge` with that absolute Node launcher. Keep the working directory at the user's target project; never run task initialization in the skill installation directory. The launcher preserves the working directory and uses only its adjacent installed runtime. In a source checkout without the bundled launcher, use the built CLI or an explicitly selected installed `chatbridge`.
+
+Runtime documentation is available under the bundle's `node_modules/codex-duet/docs/` after setup. GITHUB mode requires its Planner/Reviewer contracts at `docs/contracts/planner-v1.md` and `docs/contracts/reviewer-v1.md` in the target repository's immutable baseline. Inspect existing contracts; if missing, propose copying the bundled contracts as a separate project setup change before starting the task. Never overwrite existing contracts or silently commit/push setup. Installation alone does not initialize tasks or authorize Browser sends. This skill's orchestration recipe covers GITHUB mode; for an explicit LOCAL request consult the installed `docs/local-mode.md` and `docs/remote-local-mode.md` instead of using `duet` as a LOCAL lifecycle.
+
 Act as the outer orchestrator and sole Executor. ChatGPT Web is only the Planner, Architect, and Reviewer. Follow [the deterministic multi-round workflow](references/workflow.md) and the repository's authoritative architecture documents, especially `docs/architecture.md`, ADR-010, ADR-012, ADR-013, and ADR-015.
 
 Normalize the user's request into a strict TaskSpecV1 without changing it, expanding scope, dropping exact literals, or deciding major product choices. Preserve the raw request separately. Codex owns normalization; chatbridge only validates and persists the candidate. For new tasks always pass `--task-spec-file` to `duet init`, which emits the compact Planner projection. Unless the user explicitly asks to skip planning, obtain a ChatGPT PLAN before editing.

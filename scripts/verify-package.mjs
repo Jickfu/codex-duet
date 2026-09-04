@@ -113,3 +113,4 @@ const result = {
 };
 await writeFile(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2) + '\n');
 console.log(JSON.stringify({ ...result, evidence }, null, 2));
+export { result, evidence };

@@ -78,6 +78,8 @@ jobs:
       - run: npm run lint
       - name: Build, audit and install the package outside the checkout
         run: npm run verify:package
+      - name: Verify the downloadable skill outside the checkout
+        run: npm run verify:skill
       - name: Preserve only verified package outputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

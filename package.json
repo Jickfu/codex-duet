@@ -16,6 +16,8 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "node scripts/build-package.mjs",
     "verify:package": "node scripts/verify-package.mjs",
+    "build:skill": "node scripts/build-skill.mjs",
+    "verify:skill": "npm run build && node scripts/verify-skill.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

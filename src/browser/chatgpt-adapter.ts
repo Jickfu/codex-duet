@@ -1,4 +1,4 @@
-import type { BrowserContext, ElementHandle, Frame, Page } from 'playwright';
+import type { BrowserContext, ElementHandle, Frame, Page, Request } from 'playwright';
 import { BridgeTimeoutError, ChatbridgeError } from '../core/errors.js';
 import type {
   BrowserConnectOptions,
@@ -362,6 +362,7 @@ class OperationGuard {
   private resolveInvalidation!: () => void;
   private readonly invalidated: Promise<void>;
   private readonly listener: (frame: Frame) => void;
+  private readonly requestListener: (request: Request) => void;
   constructor(
     private readonly page: Page,
     private readonly policy: OriginPolicy,
@@ -373,7 +374,20 @@ class OperationGuard {
         this.resolveInvalidation();
       }
     };
+    // A navigation request precedes document commit. Latch denial here rather than
+    // hoping the framenavigated event arrives during an arbitrary error delay.
+    this.requestListener = (request) => {
+      if (
+        request.isNavigationRequest() &&
+        !policy.allows(request.url()) &&
+        request.frame() === page.mainFrame()
+      ) {
+        this.invalid = true;
+        this.resolveInvalidation();
+      }
+    };
     page.on('framenavigated', this.listener);
+    page.on('request', this.requestListener);
   }
   assertValid() {
     if (this.invalid || !this.policy.allows(this.page.url())) {
@@ -388,8 +402,6 @@ class OperationGuard {
       this.assertValid();
       return value;
     } catch (error) {
-      if (error instanceof Error && /execution context was destroyed/i.test(error.message))
-        await this.delay(25);
       this.assertValid();
       throw error;
     }
@@ -401,5 +413,6 @@ class OperationGuard {
   }
   dispose() {
     this.page.off('framenavigated', this.listener);
+    this.page.off('request', this.requestListener);
   }
 }

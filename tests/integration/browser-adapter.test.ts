@@ -365,8 +365,10 @@ describe('ChatGPT adapter fixture', () => {
   it('does not leak navigation guards across long-running operations', async () => {
     const { page, adapter } = await connectedFixture();
     const before = (page as any).listenerCount('framenavigated');
+    const requestsBefore = (page as any).listenerCount('request');
     for (let i = 0; i < 10; i++) await adapter.sendMessage(`message-${i}`);
     expect((page as any).listenerCount('framenavigated')).toBe(before);
+    expect((page as any).listenerCount('request')).toBe(requestsBefore);
     await page.close();
   });
   it('waits through streaming and returns only the new final message', async () => {
@@ -667,5 +669,79 @@ describe('ChatGPT adapter fixture', () => {
     ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
     await expectForeignUntouched(x.page);
     await x.isolated.close();
+  });
+  it('denies a foreign navigation request before commit without a timing grace period', async () => {
+    const x = await adversarialFixture(
+      '<div data-message-author-role="user" data-message-id="user-final">prompt</div><div data-message-author-role="assistant" data-message-id="assistant-final">final</div>',
+    );
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    await x.isolated.route('https://example.test/pending', async (route) => {
+      await blocked;
+      await route.abort();
+    });
+    const adapter = new PlaywrightChatGPTWebAdapter(
+      x.isolated,
+      'https://chatgpt.com/',
+      1500,
+      false,
+      ['https://chatgpt.com'],
+      async () => {
+        const request = x.page.waitForRequest('https://example.test/pending');
+        await x.page.evaluate(() => {
+          location.href = 'https://example.test/pending';
+        });
+        await request;
+        // Commit is deliberately held back, including beyond the former 25ms grace.
+        expect(x.page.url()).toBe('https://chatgpt.com/c/adversarial');
+        throw new Error('Execution context was destroyed');
+      },
+    );
+    try {
+      await adapter.connect();
+      await expect(
+        adapter.waitForAssistantMessage({
+          checkpoint: checkpoint('user-final', 'https://chatgpt.com/c/adversarial'),
+          timeoutMs: 1000,
+        }),
+      ).rejects.toMatchObject({ code: 'ORIGIN_DENIED' });
+    } finally {
+      release();
+      await x.isolated.close();
+    }
+  });
+  it('does not treat foreign subframes or subresources as main-frame navigation', async () => {
+    const x = await adversarialFixture(
+      '<div data-message-author-role="user" data-message-id="user-final">prompt</div><div data-message-author-role="assistant" data-message-id="assistant-final">final</div>',
+    );
+    const adapter = new PlaywrightChatGPTWebAdapter(
+      x.isolated,
+      'https://chatgpt.com/',
+      1500,
+      false,
+      ['https://chatgpt.com'],
+      async () => {
+        await x.page.evaluate(async () => {
+          await new Promise<void>((resolve) => {
+            const frame = document.createElement('iframe');
+            frame.onload = () => resolve();
+            frame.src = 'https://example.test/iframe';
+            document.body.append(frame);
+          });
+          await fetch('https://example.test/resource', { mode: 'no-cors' });
+        });
+      },
+    );
+    try {
+      await adapter.connect();
+      await expect(
+        adapter.waitForAssistantMessage({
+          checkpoint: checkpoint('user-final', 'https://chatgpt.com/c/adversarial'),
+          timeoutMs: 1000,
+        }),
+      ).resolves.toBe('final');
+    } finally {
+      await x.isolated.close();
+    }
   });
 });

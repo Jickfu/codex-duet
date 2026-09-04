@@ -2,7 +2,7 @@
 
 TaskInteractionPolicyV1 selects a Browser Control Plane provider, not a code Data Plane. Both `CODEX_BROWSER` and `PLAYWRIGHT_CLI` may carry only compact control messages. Neither may carry repository source or diffs, and provider selection cannot change GitHub or LOCAL code authority. Optional Discussion is likewise Control Plane traffic and remains outside C2C.
 
-Status: GITHUB **IMPLEMENTED / FROZEN M2**; LOCAL **FROZEN M4 LOCAL SCOPE / REMOTE M5 PLANNED**
+Status: GITHUB **IMPLEMENTED / FROZEN M2**; LOCAL **FROZEN M4 LOCAL SCOPE / REMOTE M5 DEVELOPMENT**
 
 The Browser Bridge is the shared Control Plane. It transports compact C2C lifecycle messages between Codex Desktop and ChatGPT Web. Code context travels through a separate, mode-specific Data Plane.
 
@@ -37,7 +37,7 @@ The Control Plane may carry `PLANNING`, `PLAN`, `EXECUTED`, `REVIEW`, `DONE`, `B
 | Private/unpushed repository   | Yes   | No GitHub requirement |
 | Immutable GitHub `REVIEW_REF` | No    | Yes                   |
 
-LOCAL reads use immutable Git-worktree snapshots, not live-file fallback. The cloudflared/remote-ChatGPT row remains planned for M5; M4 provides local MCP integration. Both modes share C2C, state transitions, Browser Control Plane and response ingress; CodeProvider and formal review identity differ.
+LOCAL reads use immutable Git-worktree snapshots, not live-file fallback. M5 adds authenticated temporary remote exposure; real ChatGPT acceptance remains pending. M4 provides local MCP integration. Both modes share C2C, state transitions, Browser Control Plane and response ingress; CodeProvider and formal review identity differ.
 
 ## GITHUB Data Plane
 
@@ -45,4 +45,4 @@ ChatGPT reads commits and diffs from GitHub. Codex must commit and push the task
 
 ## LOCAL Data Plane
 
-The localhost-only MCP library exposes eight bounded read tools against exact task/snapshot identities, including uncommitted files and snapshot-bound diffs without GitHub. `LocalReviewTargetV1` binds baseline/current/previous snapshots plus immutable test and execution evidence; it is not a GitHub REVIEW_REF. Disabled-by-default `submit_response` authenticates an exact task/control capability and enters the shared lifecycle ingress. Public HTTPS, remote access and cloudflared are unimplemented M5 work. See [LOCAL mode](local-mode.md).
+The localhost-only MCP library exposes eight bounded read tools against exact task/snapshot identities, including uncommitted files and snapshot-bound diffs without GitHub. `LocalReviewTargetV1` binds baseline/current/previous snapshots plus immutable test and execution evidence; it is not a GitHub REVIEW_REF. Disabled-by-default `submit_response` authenticates an exact task/control capability and enters the shared lifecycle ingress. The separate [M5 remote development listener](remote-local-mode.md) uses local OAuth approval and an owned cloudflared tunnel, exposes only read tools, and retains Browser response ingress. See [LOCAL mode](local-mode.md).

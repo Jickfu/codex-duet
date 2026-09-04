@@ -1,5 +1,6 @@
 import { access, readFile } from 'node:fs/promises';
 import { registerLocalLifecycleCommands } from './local-lifecycle.js';
+import { registerLocalRemoteCommands } from './local-remote.js';
 import path from 'node:path';
 import type { Command } from 'commander';
 import { z } from 'zod';
@@ -60,6 +61,7 @@ export function registerLocalCommands(
     .command('local')
     .description('LOCAL snapshot data plane (no commit, push or test execution)');
   registerLocalLifecycleCommands(local, cwd, report);
+  registerLocalRemoteCommands(local, cwd);
   local
     .command('bind-task-spec')
     .description('Bind immutable LOCAL semantics before execution; no message send')

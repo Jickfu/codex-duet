@@ -1,8 +1,8 @@
 # LOCAL mode
 
-Status: **M4 FROZEN — LOCALLY TESTABLE SCOPE; M5 PLANNED**. See the [freeze and acceptance record](milestones/M4-local-readonly-mcp.md).
+Status: **M4 FROZEN — LOCALLY TESTABLE SCOPE; M5 DEVELOPMENT**. See the [freeze and acceptance record](milestones/M4-local-readonly-mcp.md) and [M5 remote setup](remote-local-mode.md).
 
-LOCAL mode is for private, unpushed, or uncommitted Git workspaces. It preserves Codex as the sole Executor. Immutable snapshots, bounded snapshot-bound reads, a loopback MCP server library, capability-scoped response ingress, guarded lifecycle, both selected Browser providers and optional Discussion are implemented. Acceptance is local/fixture-based; remote ChatGPT access and cloudflared remain M5.
+LOCAL mode is for private, unpushed, or uncommitted Git workspaces. It preserves Codex as the sole Executor. Immutable snapshots, bounded snapshot-bound reads, a loopback MCP server library, capability-scoped response ingress, guarded lifecycle, both selected Browser providers and optional Discussion are implemented. M4 acceptance is local/fixture-based. The separate M5 development entry point is `local remote-serve`; real ChatGPT acceptance remains pending. The remaining sections describe the frozen M4 foundation unless noted otherwise.
 
 ## Implemented data-plane CLI
 

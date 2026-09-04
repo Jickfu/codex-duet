@@ -6,7 +6,7 @@ M6.1 provides source packaging and offline prerequisite checks. This is not an n
 
 From a source checkout with development dependencies installed:
 
-Use Node >=22.13 for the pinned pnpm 11 build tool. The installed CLI declares Node >=20; build-tool compatibility and installed-runtime compatibility are separate. [Cross-platform package verification](milestones/M6-cross-platform-packaging.md) records the tested combinations.
+Use Node >=22.13 for the pinned pnpm 11 build tool. The installed CLI declares Node >=20; build-tool compatibility and installed-runtime compatibility are separate. [Cross-platform package verification](milestones/M6-cross-platform-packaging.md) records the tested combinations. The [cross-platform regression gate](milestones/M6-regression-gate.md) runs the full suite on Node 24 across all three platforms before package verification.
 
 ```text
 pnpm install --frozen-lockfile

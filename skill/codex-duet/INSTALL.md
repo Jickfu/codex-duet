@@ -4,7 +4,21 @@
 
 需要 Node.js 20+（含 npm）、Git，以及可用的 Codex 浏览器能力或 Playwright 浏览器连接。第一次安装依赖需要联网；`codex-duet` 本体来自随包附带的 tarball，不从 npm 注册表获取。浏览器登录和连接按任务单独设置。
 
-把目录放到你的 skill 安装位置，或直接让 Codex 读取该目录的 `SKILL.md`。在该目录打开终端执行：
+## 安装到当前项目（推荐）
+
+先确认用户当前项目的绝对根目录。不要将下载目录误认为目标项目。把分发包解压到临时目录，然后执行：
+
+```text
+npm --prefix "<解压后的codex-duet目录>" run install:project -- --project "<目标项目的绝对根目录>"
+```
+
+该命令会安装到 `<目标项目>/.agents/skills/codex-duet/`，安装依赖并运行 doctor。仅在输出 `status: INSTALLED`、`doctor: PASS` 后报告安装成功。目标已有同名目录或父目录为符号链接时会停止，不能覆盖。安装失败后保留新建目录供检查；解决原因后在该目录执行 setup 并重新验证 doctor，不要删除用户文件。
+
+安装不会提交或推送项目，也不会初始化开发任务。已有 `.chatbridge` 和其他 skill 必须保留。项目新增 skill 文件的版本管理应在启动要求干净工作区的 GITHUB 流程前处理。Codex 未显示新 skill 时，可重启或明确读取该目录的 `SKILL.md`。
+
+## 直接使用解压目录
+
+也可以在解压目录执行：
 
 ```text
 npm run setup

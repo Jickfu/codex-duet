@@ -54,3 +54,11 @@ ChatGPT returned a protocol code block with valid quote escaping. The block text
 After begin-execution, only generated `greeting.mjs` changed to append one exclamation mark. The unchanged `node test.mjs` printed PASS and exited zero; diff whitespace validation passed. Snapshot `e742ec2c93b6144c52ceee47142b2266b0a1e14fbaf203c3ed36b5b4b3acc99d` received exact test/execution evidence and was formally prepared for review. Lifecycle is now EXECUTED, iteration 1, confirmed=false. Real remote Reviewer acceptance remains pending reconnection to a new service lifetime.
 
 Implementation validation: typecheck, lint, build and the complete serial suite passed: **54 files, 536 passed, one platform skip (537 total)**. The live first-attempt repair also passed. Broader ambiguous syntax and PLAYWRIGHT_CLI format repair are not claimed.
+
+## Reviewer reconnection observation
+
+The user approved new request `40776dfe-98b6-4739-876b-78634be8f545` for the same task and read-only lifetime. Token exchange returned 200. New development app `asdk_app_6a9a4674a9888191b1b1ef5bf74fad66` initially showed no actions; the public Refresh action populated the eight read tools.
+
+The original conversation's plugin menu did not offer this new app, including after reload and a search for `审查`. A fresh unsent conversation using the same search did show `Codex Duet M5 审查验收`. This is an observed UI availability difference, not proof of a universal ChatGPT restriction. No message was sent in the fresh conversation, and the task binding was not changed.
+
+Reviewer operation `36dc1d42b76fb1290a416c0e465dcb7e298125909897c9cf83eb53c8707f7dda`, outbound SHA-256 `d96e8887fefcd22d2fb44d86f382e460f66194f98dca999fc4b839d4fd965fbe`, remains PREPARED (never ATTEMPTED). LOCAL remains EXECUTED, iteration 1, confirmed=false. Remote review has not passed. A controlled conversation handoff or a verified way to make the new connection available in the bound conversation is required before continuing; do not reset/recreate the task or silently rebind it.

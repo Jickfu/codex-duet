@@ -60,6 +60,17 @@ export class InteractionService {
     identity: { kind: 'DISCUSSION' | 'PLANNER' | 'REVIEWER'; iteration: number; round?: number },
     conversationUrl?: string,
   ): Promise<CodexBrowserControlV1> {
+    return this.codexBrowser.withOperationLock(taskId, () =>
+      this.prepareCodexBrowserUnlocked(taskId, messageFile, identity, conversationUrl),
+    );
+  }
+
+  private async prepareCodexBrowserUnlocked(
+    taskId: string,
+    messageFile: string,
+    identity: { kind: 'DISCUSSION' | 'PLANNER' | 'REVIEWER'; iteration: number; round?: number },
+    conversationUrl?: string,
+  ): Promise<CodexBrowserControlV1> {
     const policy = await this.requireProvider(taskId, 'CODEX_BROWSER');
     if (!policy)
       throw new ChatbridgeError(
@@ -147,6 +158,12 @@ export class InteractionService {
   }
 
   async markCodexBrowserAttempted(taskId: string): Promise<CodexBrowserControlV1> {
+    return this.codexBrowser.withOperationLock(taskId, () =>
+      this.markCodexBrowserAttemptedUnlocked(taskId),
+    );
+  }
+
+  private async markCodexBrowserAttemptedUnlocked(taskId: string): Promise<CodexBrowserControlV1> {
     const policy = await this.requireProvider(taskId, 'CODEX_BROWSER');
     if (!policy)
       throw new ChatbridgeError(
@@ -168,6 +185,16 @@ export class InteractionService {
   }
 
   async completeCodexBrowser(
+    taskId: string,
+    outcome: 'CONFIRMED' | 'OUTCOME_UNKNOWN',
+    conversationUrl?: string,
+  ): Promise<CodexBrowserControlV1> {
+    return this.codexBrowser.withOperationLock(taskId, () =>
+      this.completeCodexBrowserUnlocked(taskId, outcome, conversationUrl),
+    );
+  }
+
+  private async completeCodexBrowserUnlocked(
     taskId: string,
     outcome: 'CONFIRMED' | 'OUTCOME_UNKNOWN',
     conversationUrl?: string,
@@ -223,6 +250,16 @@ export class InteractionService {
   }
 
   async recordCodexBrowserResponse(
+    taskId: string,
+    responseFile: string,
+    conversationUrl?: string,
+  ): Promise<CodexBrowserControlV1> {
+    return this.codexBrowser.withOperationLock(taskId, () =>
+      this.recordCodexBrowserResponseUnlocked(taskId, responseFile, conversationUrl),
+    );
+  }
+
+  private async recordCodexBrowserResponseUnlocked(
     taskId: string,
     responseFile: string,
     conversationUrl?: string,

@@ -132,7 +132,7 @@ describe('LOCAL CLI data-plane integration', () => {
         completedControl: (record) => localMcpControlCompleted(root, record),
       },
     );
-    const url = 'https://chatgpt.com/c/fixture';
+    let url = 'https://chatgpt.com/c/fixture';
     const outbound = path.join(stateRoot, 'outbound.txt');
     const inbound = path.join(stateRoot, 'inbound.txt');
     const discussion = new DiscussionStore(stateRoot);
@@ -307,6 +307,23 @@ describe('LOCAL CLI data-plane integration', () => {
         url,
       );
       await expect(cli('confirm-control', '--task', 'demo')).rejects.toThrow();
+      if (kind === 'REVIEWER' && state === 'DONE') {
+        const beforeRun = await readFile(path.join(stateRoot, 'runs/demo/local/run.json'));
+        const originalUrl = url;
+        url = 'https://chatgpt.com/c/reviewer-handoff';
+        await cli(
+          'reviewer-handoff',
+          '--task',
+          'demo',
+          '--from',
+          originalUrl,
+          '--to',
+          url,
+          '--reason',
+          'Explicit fixture handoff approval',
+        );
+        expect(await readFile(path.join(stateRoot, 'runs/demo/local/run.json'))).toEqual(beforeRun);
+      }
       await interaction.markCodexBrowserAttempted('demo');
       await interaction.completeCodexBrowser('demo', 'CONFIRMED', url);
       await cli('confirm-control', '--task', 'demo');

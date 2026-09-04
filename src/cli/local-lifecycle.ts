@@ -14,6 +14,9 @@ import { StoredLocalLifecycleGates } from '../local/lifecycle-gates.js';
 import { LocalTaskSpecStore } from '../local/task-spec.js';
 import { LocalDiscussion } from '../local/discussion.js';
 import { registerLocalPlaywrightCommands } from './local-playwright.js';
+import { handoffLocalReviewer } from '../local/conversation-handoff.js';
+import { localTaskActivity } from '../local/activity.js';
+import { DuetRunStore } from '../duet/run-store.js';
 
 export function registerLocalLifecycleCommands(
   local: Command,
@@ -46,6 +49,35 @@ export function registerLocalLifecycleCommands(
       ),
     };
   }
+  local
+    .command('reviewer-handoff')
+    .description('Record an explicitly authorized conversation change for an unsent LOCAL Reviewer')
+    .requiredOption('--task <id>')
+    .requiredOption('--from <url>')
+    .requiredOption('--to <url>')
+    .requiredOption('--reason <text>')
+    .action(async (o: { task: string; from: string; to: string; reason: string }) => {
+      const { taskId, stateRoot, lifecycle } = await runtime(o.task);
+      report(
+        await handoffLocalReviewer(
+          stateRoot,
+          { taskId, from: o.from, to: o.to, reason: o.reason },
+          () => lifecycle.status(taskId),
+          {
+            getState: async (id) => {
+              const github = await new DuetRunStore(stateRoot).read(id);
+              const localState = await localTaskActivity(cwd(), id);
+              if (github && localState)
+                throw new ChatbridgeError(
+                  'Task ID has conflicting modes',
+                  'LOCAL_TASK_MODE_CONFLICT',
+                );
+              return github?.state ?? localState;
+            },
+          },
+        ),
+      );
+    });
   local
     .command('format-repair-prepare')
     .description(

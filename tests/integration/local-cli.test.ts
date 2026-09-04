@@ -172,7 +172,7 @@ describe('LOCAL CLI data-plane integration', () => {
       taskSpecSha256: spec.integrity.sha256,
       controlSha256: sha256(canonicalJson(control)),
       requestSha256: control.requestSha256,
-      outcome: 'CONVERGED' as const,
+      outcome: 'USER_DECISION_REQUIRED' as const,
       content: 'Agreed fixture',
     };
     const pendingSummary = await discussion.readSummary('demo');
@@ -194,11 +194,86 @@ describe('LOCAL CLI data-plane integration', () => {
     await cli('discussion-ingest', '--task', 'demo', '--message-file', inbound);
     await cli('discussion-ingest', '--task', 'demo', '--message-file', inbound);
     await discussion.writeSummary(pendingSummary!); // Simulated crash before summary publication.
-    expect((await cli('discussion-status', '--task', 'demo')).status).toBe('CONVERGED');
+    expect((await cli('discussion-status', '--task', 'demo')).status).toBe('BLOCKED');
     await expect(cli('run-init', '--task', 'demo')).rejects.toThrow();
-    expect((await cli('discussion-recover', '--task', 'demo')).status).toBe('CONVERGED');
+    expect((await cli('discussion-recover', '--task', 'demo')).status).toBe('BLOCKED');
+    const originalSummary = canonicalJson(await discussion.readSummary('demo'));
+    const discussionDecisionFile = path.join(stateRoot, 'discussion-decision.txt');
+    await writeFile(
+      discussionDecisionFile,
+      'Retain the existing requirements and use the documented behavior.\n',
+    );
+    const resumeArgs = [
+      'discussion-resume',
+      '--task',
+      'demo',
+      '--blocked-control-sha256',
+      sha256(canonicalJson(control) + '\n'),
+      '--decision-file',
+      discussionDecisionFile,
+      '--scope-unchanged',
+    ];
+    const supplemental = await cli(...resumeArgs);
+    expect(await cli(...resumeArgs)).toEqual(supplemental);
+    expect(await readFile(supplemental.controlFile, 'utf8')).toBe(
+      canonicalJson(supplemental.control) + '\n',
+    );
+    const supplementalStore = new DiscussionStore(stateRoot, 'local-supplement');
+    for (const round of [1, 2]) {
+      const current =
+        round === 1
+          ? supplemental
+          : await cli(
+              'discussion-prepare',
+              '--task',
+              'demo',
+              '--round',
+              String(round),
+              '--request-file',
+              questionFile,
+              '--supplement',
+            );
+      await expect(cli('run-init', '--task', 'demo')).rejects.toThrow();
+      await interaction.prepareCodexBrowser(
+        'demo',
+        current.controlFile,
+        { kind: 'DISCUSSION', iteration: 1, round },
+        url,
+      );
+      await interaction.markCodexBrowserAttempted('demo');
+      await interaction.completeCodexBrowser('demo', 'CONFIRMED', url);
+      await writeFile(
+        inbound,
+        JSON.stringify({
+          ...answer,
+          round,
+          controlSha256: sha256(canonicalJson(current.control)),
+          requestSha256: current.control.requestSha256,
+          outcome: round === 2 ? 'CONVERGED' : 'CONTINUE',
+        }),
+      );
+      await expect(
+        cli('discussion-ingest', '--task', 'demo', '--message-file', inbound, '--supplement'),
+      ).rejects.toThrow();
+      await interaction.recordCodexBrowserResponse('demo', inbound, url);
+      const pending = await supplementalStore.readSummary('demo');
+      await cli('discussion-ingest', '--task', 'demo', '--message-file', inbound, '--supplement');
+      if (round === 2) {
+        await supplementalStore.writeSummary(pending!);
+        expect((await cli('discussion-status', '--task', 'demo', '--supplement')).status).toBe(
+          'CONVERGED',
+        );
+        await expect(cli('run-init', '--task', 'demo')).rejects.toThrow();
+        await cli('discussion-recover', '--task', 'demo', '--supplement');
+      }
+    }
+    expect(canonicalJson(await discussion.readSummary('demo'))).toBe(originalSummary);
     const run = await cli('run-init', '--task', 'demo');
     expect(run.state).toBe('PLANNING');
+    expect(run.discussionDecision.decision).toBe(await readFile(discussionDecisionFile, 'utf8'));
+    expect(JSON.parse(parseEnvelope(run.control).content).identity.discussionDecisionSha256).toBe(
+      run.discussionDecision.decisionSha256,
+    );
     const snapshots = await GitLocalSnapshotAuthority.open(root, 'demo');
     const evidenceStore = new LocalEvidenceStore(stateRoot);
     const provider = new LocalCodeProvider(snapshots, evidenceStore, stateRoot);
@@ -222,6 +297,9 @@ describe('LOCAL CLI data-plane integration', () => {
     ) {
       await writeFile(outbound, envelope);
       const parsed = parseEnvelope(envelope);
+      expect(JSON.parse(parsed.content).identity.discussionDecisionSha256).toBe(
+        run.discussionDecision.decisionSha256,
+      );
       await interaction.prepareCodexBrowser(
         'demo',
         outbound,

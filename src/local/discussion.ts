@@ -16,11 +16,26 @@ import {
 import { TaskInteractionPolicyStore } from '../duet/interaction-policy-store.js';
 import { TaskOperationLock } from '../duet/task-operation-lock.js';
 import { canonicalJson, sha256 } from '../duet/task-spec.js';
-import { assertLocalContracts, LocalTaskSpecStore } from './task-spec.js';
+import { assertLocalContracts, LocalTaskSpecStore, type LocalTaskSpecV1 } from './task-spec.js';
+import type { TaskInteractionPolicyV1 } from '../duet/interaction-policy.js';
+import { LocalDecisionInputSchema, type LocalDecisionInput } from './user-decision.js';
+import {
+  DiscussionDecisionStore,
+  discussionDecisionHash,
+  type DiscussionDecision,
+} from './discussion-decision.js';
 import type { GitLocalSnapshotAuthority } from './git-snapshot-authority.js';
 import type { LocalCodeProvider } from './local-code-provider.js';
 
 type Round = { control: DiscussionControlV1; response?: DiscussionResponseV1 };
+type Authority = {
+  spec: LocalTaskSpecV1;
+  policy: TaskInteractionPolicyV1;
+  policies: TaskInteractionPolicyStore;
+  supplement?: DiscussionDecision | undefined;
+};
+const SUPPLEMENT_QUESTION =
+  'Continue discussion using the explicit user decision; preserve all accepted task requirements.';
 
 /** Pre-run LOCAL Discussion. Immutable round files are recovery authority, not a mutable summary. */
 export class LocalDiscussion {
@@ -28,23 +43,37 @@ export class LocalDiscussion {
   private readonly store: DiscussionStore;
   constructor(
     private readonly root: string,
-    private readonly provider: LocalCodeProvider,
-    private readonly snapshots: GitLocalSnapshotAuthority,
+    private readonly provider?: LocalCodeProvider,
+    private readonly snapshots?: GitLocalSnapshotAuthority,
+    private readonly segment: 'primary' | 'supplement' = 'primary',
   ) {
     this.lock = new TaskOperationLock(root);
-    this.store = new DiscussionStore(root);
+    this.store = new DiscussionStore(
+      root,
+      segment === 'supplement' ? 'local-supplement' : undefined,
+    );
   }
 
-  private async authority(taskId: string) {
-    const context = (await this.provider.status(taskId)).context;
+  private runtime() {
+    if (!this.provider || !this.snapshots) this.fail('DISCUSSION_READ_ONLY');
+    return { provider: this.provider, snapshots: this.snapshots };
+  }
+  private async authority(taskId: string): Promise<Authority> {
+    const { provider, snapshots } = this.runtime();
+    const context = (await provider.status(taskId)).context;
     const spec = await new LocalTaskSpecStore(this.root).read(context);
     const policies = new TaskInteractionPolicyStore(this.root);
     const policy = await policies.read(taskId);
     if (!policy?.discussion.enabled) this.fail('DISCUSSION_DISABLED');
     if (policy.browserControlProvider !== 'CODEX_BROWSER')
       this.fail('LOCAL_TRANSPORT_PROOF_UNAVAILABLE');
-    await assertLocalContracts(spec, this.snapshots.store);
-    return { spec, policy, policies };
+    await assertLocalContracts(spec, snapshots.store);
+    const authority: Authority = { spec, policy, policies };
+    if (this.segment === 'supplement') {
+      authority.supplement = await this.supplementDecision(taskId, authority);
+      if (!authority.supplement) this.fail('DISCUSSION_USER_DECISION_REQUIRED');
+    }
+    return authority;
   }
 
   async prepare(taskInput: string, roundInput: number, question: string) {
@@ -53,37 +82,11 @@ export class LocalDiscussion {
     if (!question.trim()) this.fail('DISCUSSION_REQUEST_EMPTY');
     return this.lock.withLock(taskId, async () => {
       const authority = await this.authority(taskId);
-      const { spec, policy, policies } = authority;
+      const { spec, policies } = authority;
       const history = await this.history(taskId, authority);
-      const content = canonicalJson({
-        context: spec.context,
-        question: question.trim(),
-        task: {
-          objective: spec.objective,
-          scope: spec.scope,
-          acceptanceCriteria: spec.acceptanceCriteria,
-          exactLiterals: spec.exactLiterals,
-          protocolRequirements: spec.protocolRequirements,
-          ...(spec.guidance ? { guidance: spec.guidance } : {}),
-        },
-        instructions:
-          'Discuss architecture only. Read source via LOCAL MCP at the exact baseline snapshot. Do not edit or execute commands. Return DiscussionResponseV1 JSON echoing task, iteration, round, provider, taskSpecSha256, controlSha256 (canonical control without terminal newline) and requestSha256. outcome is CONTINUE, CONVERGED, USER_DECISION_REQUIRED or FAILED; content is a nonempty string.',
-      });
-      const previous = history[round - 2]?.response;
-      const control = DiscussionControlV1Schema.parse({
-        version: 1,
-        kind: 'DISCUSSION_CONTROL',
-        taskId,
-        iteration: 1,
-        round,
-        provider: policy.browserControlProvider,
-        taskSpecSha256: spec.integrity.sha256,
-        interactionPolicySha256: sha256(canonicalJson(policy)),
-        ...(previous ? { previousResponseSha256: sha256(canonicalJson(previous)) } : {}),
-        requestSha256: sha256(content),
-        content,
-      });
-      this.bound(canonicalJson(control) + '\n');
+      if (this.segment === 'supplement' && round === 1 && question.trim() !== SUPPLEMENT_QUESTION)
+        this.fail('DISCUSSION_ARTIFACT_IMMUTABLE');
+      const control = this.project(taskId, round, question, authority, history);
       const existing = history[round - 1];
       if (existing) {
         if (canonicalJson(existing.control) !== canonicalJson(control))
@@ -98,12 +101,170 @@ export class LocalDiscussion {
         this.fail('DISCUSSION_RESPONSE_PENDING');
       await this.assertPreRun(taskId);
       await policies.lock(taskId);
-      await this.snapshots.assertLiveSnapshot(spec.context.baselineSnapshotId);
-      // If the summary write is interrupted, the immutable control recovers this same round.
+      await this.runtime().snapshots.assertLiveSnapshot(spec.context.baselineSnapshotId);
       await this.store.createControl(control);
       await this.store.writeSummary(this.summary(taskId, [...history, { control }]));
       return control;
     });
+  }
+
+  private project(
+    taskId: string,
+    round: number,
+    question: string,
+    authority: Authority,
+    history: Round[],
+  ) {
+    const { spec, policy, supplement } = authority;
+    const content = canonicalJson({
+      context: spec.context,
+      question: question.trim(),
+      ...(supplement
+        ? {
+            supplement,
+            supplementRules:
+              'This is the only user-authorized supplemental discussion, limited to three rounds. The decision only clarifies unchanged task requirements. If it conflicts with scope or requirements, return USER_DECISION_REQUIRED and require a new task. Never restart automatically or authorize execution.',
+          }
+        : {}),
+      task: {
+        objective: spec.objective,
+        scope: spec.scope,
+        acceptanceCriteria: spec.acceptanceCriteria,
+        exactLiterals: spec.exactLiterals,
+        protocolRequirements: spec.protocolRequirements,
+        ...(spec.guidance ? { guidance: spec.guidance } : {}),
+      },
+      instructions:
+        'Discuss architecture only. Read source via LOCAL MCP at the exact baseline snapshot. Do not edit or execute commands. Return DiscussionResponseV1 JSON echoing task, iteration, round, provider, taskSpecSha256, controlSha256 (canonical control without terminal newline) and requestSha256. outcome is CONTINUE, CONVERGED, USER_DECISION_REQUIRED or FAILED; content is a nonempty string.',
+    });
+    const previous = history[round - 2]?.response;
+    const control = DiscussionControlV1Schema.parse({
+      version: 1,
+      kind: 'DISCUSSION_CONTROL',
+      taskId,
+      iteration: 1,
+      round,
+      provider: policy.browserControlProvider,
+      taskSpecSha256: spec.integrity.sha256,
+      interactionPolicySha256: sha256(canonicalJson(policy)),
+      ...(previous
+        ? { previousResponseSha256: sha256(canonicalJson(previous)) }
+        : supplement
+          ? { previousResponseSha256: supplement.blockedResponseSha256 }
+          : {}),
+      requestSha256: sha256(content),
+      content,
+    });
+    this.bound(canonicalJson(control) + '\n');
+    return control;
+  }
+
+  async resume(taskInput: string, input: LocalDecisionInput) {
+    const taskId = TaskIdSchema.parse(taskInput);
+    const request = LocalDecisionInputSchema.parse(input);
+    if (this.segment !== 'primary') this.fail('DISCUSSION_SUPPLEMENT_IMMUTABLE');
+    await this.lock.withLock(taskId, async () => {
+      const authority = await this.authority(taskId);
+      const existing = await this.supplementDecision(taskId, authority);
+      if (existing) {
+        if (
+          existing.blockedControlSha256 !== request.blockedControlSha256 ||
+          existing.decision !== request.decision
+        )
+          this.fail('DISCUSSION_SUPPLEMENT_IMMUTABLE');
+        return;
+      }
+      const history = await this.history(taskId, authority);
+      const blocked = history.at(-1);
+      if (
+        blocked?.response?.outcome !== 'USER_DECISION_REQUIRED' ||
+        sha256(canonicalJson(blocked.control) + '\n') !== request.blockedControlSha256
+      )
+        this.fail('DISCUSSION_USER_DECISION_REQUIRED');
+      const content = {
+        version: 1 as const,
+        taskId,
+        ...request,
+        taskSpecSha256: authority.spec.integrity.sha256,
+        interactionPolicySha256: sha256(canonicalJson(authority.policy)),
+        baselineSnapshotId: authority.spec.context.baselineSnapshotId,
+        blockedResponseSha256: sha256(canonicalJson(blocked.response)),
+        blockedRound: blocked.control.round,
+        blockedResult: blocked.response.content,
+        recordedAt: new Date().toISOString(),
+      };
+      const decision = { ...content, decisionSha256: discussionDecisionHash(content) };
+      this.project(taskId, 1, SUPPLEMENT_QUESTION, { ...authority, supplement: decision }, []);
+      await this.assertPreRun(taskId);
+      await authority.policies.lock(taskId);
+      await this.runtime().snapshots.assertLiveSnapshot(authority.spec.context.baselineSnapshotId);
+      await new DiscussionDecisionStore(this.root).create(decision);
+    });
+    // A crash after decision publication is recoverable using this same explicit request.
+    return new LocalDiscussion(this.root, this.provider, this.snapshots, 'supplement').prepare(
+      taskId,
+      1,
+      SUPPLEMENT_QUESTION,
+    );
+  }
+
+  /** Evidence-only gate: caller already owns lifecycle locking; no source runtime or writes. */
+  async assertConverged(spec: LocalTaskSpecV1, policy: TaskInteractionPolicyV1) {
+    const authority: Authority = {
+      spec,
+      policy,
+      policies: new TaskInteractionPolicyStore(this.root),
+    };
+    const supplement = await this.supplementDecision(spec.taskId, authority);
+    const reader = new LocalDiscussion(
+      this.root,
+      undefined,
+      undefined,
+      supplement ? 'supplement' : 'primary',
+    );
+    const history = await reader.history(spec.taskId, { ...authority, supplement });
+    const derived = reader.summary(spec.taskId, history);
+    if (
+      derived.status !== 'CONVERGED' ||
+      canonicalJson(await reader.store.readSummary(spec.taskId)) !== canonicalJson(derived)
+    )
+      this.fail('DISCUSSION_NOT_CONVERGED');
+    return supplement;
+  }
+
+  private async supplementDecision(taskId: string, authority: Authority) {
+    const decision = await new DiscussionDecisionStore(this.root).read(taskId);
+    if (!decision) {
+      const directory = path.join(this.root, 'runs', taskId, 'discussion', 'local-supplement');
+      for (const suffix of [
+        'summary.json',
+        ...[1, 2, 3].flatMap((n) => [`round-${n}/request.json`, `round-${n}/response.json`]),
+      ]) {
+        if (
+          await this.optional(async () => {
+            await access(path.join(directory, suffix));
+            return true;
+          })
+        )
+          this.fail('DISCUSSION_DECISION_INVALID');
+      }
+      return undefined;
+    }
+    const primary = new LocalDiscussion(this.root);
+    const history = await primary.history(taskId, authority);
+    const blocked = history.at(-1);
+    if (
+      blocked?.response?.outcome !== 'USER_DECISION_REQUIRED' ||
+      decision.taskSpecSha256 !== authority.spec.integrity.sha256 ||
+      decision.interactionPolicySha256 !== sha256(canonicalJson(authority.policy)) ||
+      decision.baselineSnapshotId !== authority.spec.context.baselineSnapshotId ||
+      decision.blockedRound !== blocked.control.round ||
+      decision.blockedResult !== blocked.response.content ||
+      decision.blockedControlSha256 !== sha256(canonicalJson(blocked.control) + '\n') ||
+      decision.blockedResponseSha256 !== sha256(canonicalJson(blocked.response))
+    )
+      this.fail('DISCUSSION_DECISION_INVALID');
+    return decision;
   }
 
   async ingest(taskInput: string, rawResponse: string) {
@@ -144,7 +305,7 @@ export class LocalDiscussion {
       new ConversationUrlPolicy(['https://chatgpt.com']).canonicalizeStable(
         current.conversationUrl,
       );
-      await this.snapshots.assertLiveSnapshot(authority.spec.context.baselineSnapshotId);
+      await this.runtime().snapshots.assertLiveSnapshot(authority.spec.context.baselineSnapshotId);
       // Response publication is the acceptance point; summary is a recoverable projection.
       await this.store.createResponse(response);
       entry.response = response;
@@ -172,10 +333,7 @@ export class LocalDiscussion {
     });
   }
 
-  private async history(
-    taskId: string,
-    authority: Awaited<ReturnType<LocalDiscussion['authority']>>,
-  ) {
+  private async history(taskId: string, authority: Authority) {
     const history: Round[] = [];
     let gap = false;
     for (let round = 1; round <= 3; round++) {
@@ -184,7 +342,15 @@ export class LocalDiscussion {
         DiscussionResponseV1Schema.parse(
           JSON.parse(
             await readFile(
-              path.join(this.root, 'runs', taskId, 'discussion', `round-${round}`, 'response.json'),
+              path.join(
+                this.root,
+                'runs',
+                taskId,
+                'discussion',
+                this.segment === 'supplement' ? 'local-supplement' : '',
+                `round-${round}`,
+                'response.json',
+              ),
               'utf8',
             ),
           ),
@@ -198,6 +364,16 @@ export class LocalDiscussion {
       if (gap || (history.length && history.at(-1)?.response?.outcome !== 'CONTINUE'))
         this.fail('DISCUSSION_IDENTITY_MISMATCH');
       const { spec, policy } = authority;
+      if (this.segment === 'supplement') {
+        const question: unknown = JSON.parse(control.content).question;
+        if (
+          typeof question !== 'string' ||
+          (round === 1 && question !== SUPPLEMENT_QUESTION) ||
+          canonicalJson(control) !==
+            canonicalJson(this.project(taskId, round, question, authority, history))
+        )
+          this.fail('DISCUSSION_IDENTITY_MISMATCH');
+      }
       this.bound(canonicalJson(control) + '\n');
       const previous = history.at(-1)?.response;
       if (
@@ -208,7 +384,13 @@ export class LocalDiscussion {
         control.taskSpecSha256 !== spec.integrity.sha256 ||
         control.interactionPolicySha256 !== sha256(canonicalJson(policy)) ||
         control.requestSha256 !== sha256(control.content) ||
-        control.previousResponseSha256 !== (previous ? sha256(canonicalJson(previous)) : undefined)
+        control.previousResponseSha256 !==
+          (previous
+            ? sha256(canonicalJson(previous))
+            : authority.supplement?.blockedResponseSha256) ||
+        (this.segment === 'supplement' &&
+          canonicalJson(JSON.parse(control.content).supplement) !==
+            canonicalJson(authority.supplement))
       )
         this.fail('DISCUSSION_IDENTITY_MISMATCH');
       if (response) {
@@ -311,7 +493,8 @@ export class LocalDiscussion {
     );
   }
   private async assertPreRun(taskId: string) {
-    if ((await this.provider.status(taskId)).reviews.length) this.fail('DISCUSSION_STATE_INVALID');
+    if ((await this.runtime().provider.status(taskId)).reviews.length)
+      this.fail('DISCUSSION_STATE_INVALID');
     for (const file of [
       path.join(this.root, 'runs', `${taskId}.json`),
       path.join(this.root, 'runs', taskId, 'local', 'run.json'),

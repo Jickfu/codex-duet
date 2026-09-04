@@ -66,6 +66,18 @@ chatbridge local discussion-recover --task demo
 
 Preparation returns `control` and `controlFile`. Send the exact file through the selected Browser workflow, including its terminal newline, and record the received Browser bytes before Discussion ingestion. A next round requires the previous outcome CONTINUE and an explicit next round number; the limit is three. Retrying the same round/question recovers its original control, not a new send. Status is read-only; recover repairs a missing or stale summary only from validated immutable round evidence. BLOCKED and FAILED never auto-continue.
 
+If primary Discussion returns USER_DECISION_REQUIRED, an explicit user clarification may authorize one supplemental segment of at most three rounds:
+
+```text
+chatbridge local discussion-resume --task demo --blocked-control-sha256 <exact-outbound-digest> --decision-file .chatbridge/discussion-decision.txt --scope-unchanged
+chatbridge local discussion-ingest --task demo --message-file .chatbridge/supplement-response.json --supplement
+chatbridge local discussion-prepare --task demo --round 2 --request-file .chatbridge/next-question.txt --supplement
+chatbridge local discussion-status --task demo --supplement
+chatbridge local discussion-recover --task demo --supplement
+```
+
+Resume returns the first supplemental control and its file. The digest names the blocked primary control including its terminal newline. Keep decision files outside the reviewable surface. Original records are preserved; the supplemental segment never restarts automatically and cannot be replaced by another user decision. It must converge before run-init, and its accepted clarification is bound into subsequent Planner/Reviewer controls. Scope changes require a new task. See [ADR-025](adr/ADR-025-local-discussion-supplement.md).
+
 Use the existing Codex Browser interaction commands to prepare, attempt, confirm and receive the exact control/response bytes. `confirm-control` validates that evidence; it does not send. `ingest-response` requires the exact recorded Browser response. After PLAN is accepted, begin-execution records intent; the caller edits and tests, uses capture/record-evidence, then run-prepare-review persists EXECUTED. Confirm and receive the Reviewer exchange before ingesting the result.
 
 `reconcile-execution` observes an EXECUTING run without advancing it: UNCHANGED, WORKTREE_IN_PROGRESS or REVIEW_PREPARED. Snapshot metadata may be stored, but no source edits, tests, new review targets or sends occur. REVIEW_PREPARED also reports live drift; explicitly use run-prepare-review to recover the published target.
@@ -78,7 +90,7 @@ For a lifecycle BLOCKED response, obtain the user's in-scope clarification and s
 chatbridge local resume-blocked --task demo --blocked-control-sha256 <blocked-control-sha256> --decision-file .chatbridge/decision.txt --scope-unchanged
 ```
 
-This appends a bound decision and returns PLANNING with a new control, not execution permission. Send, confirm and receive through the selected Browser workflow and accept a fresh PLAN before beginning execution. Reviewer blocking at N resumes planning for N+1 against the reviewed snapshot. The original TaskSpec is unchanged; scope or requirement changes require a new task. Exact retries preserve the decision and never consume a later block. See [ADR-023](adr/ADR-023-local-blocked-user-decisions.md). Pre-run Discussion blocking is not handled by this lifecycle command.
+This appends a bound decision and returns PLANNING with a new control, not execution permission. Send, confirm and receive through the selected Browser workflow and accept a fresh PLAN before beginning execution. Reviewer blocking at N resumes planning for N+1 against the reviewed snapshot. The original TaskSpec is unchanged; scope or requirement changes require a new task. Exact retries preserve the decision and never consume a later block. See [ADR-023](adr/ADR-023-local-blocked-user-decisions.md). Pre-run Discussion blocking uses the separate discussion-resume command above.
 
 PLAYWRIGHT_CLI remains refused until its exact-proof adapter is implemented. The default Browser CLI ingress also refuses new MCP-source responses. Explicitly enabled loopback servers can use the authenticated [MCP lifecycle adapter](adr/ADR-024-local-mcp-lifecycle-ingress.md): capability checks do not bypass confirmed Browser send, identity, state or live-snapshot guards. Accepted MCP replies leave Browser state truthful; matching durable acceptance permits the next control without inventing a Browser response. No automatic provider switch occurs. Real Browser E2E and final M4 acceptance remain pending.
 

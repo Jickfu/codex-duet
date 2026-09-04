@@ -49,7 +49,8 @@ async function fixture() {
       return { context: spec.context, reviews: [] };
     },
   };
-  const create = () => new LocalDiscussion(root, provider as never, snapshots as never);
+  const create = (segment: 'primary' | 'supplement' = 'primary') =>
+    new LocalDiscussion(root, provider as never, snapshots as never, segment);
   const browser = new InteractionService(policies, new CodexBrowserControlStore(root), [
     'https://chatgpt.com',
   ]);
@@ -87,6 +88,170 @@ async function fixture() {
   return { root, spec, create, snapshots, policies, policy, received };
 }
 describe('LOCAL Discussion durable rounds', () => {
+  it('preserves three primary rounds and allows one decision-bound three-round supplement', async () => {
+    const f = await fixture();
+    let blocked!: DiscussionControlV1;
+    let primaryReply = '';
+    for (const round of [1, 2, 3]) {
+      blocked = await f.create().prepare('demo', round, `Question ${round}`);
+      primaryReply = await f.received(blocked, round === 3 ? 'USER_DECISION_REQUIRED' : 'CONTINUE');
+      await f.create().ingest('demo', primaryReply);
+    }
+    const original = await readFile(
+      path.join(f.root, 'runs', 'demo', 'discussion', 'summary.json'),
+      'utf8',
+    );
+    const input = {
+      blockedControlSha256: sha256(canonicalJson(blocked) + '\n'),
+      decision: 'Keep the existing in-scope behavior.\n',
+      scopeUnchanged: true as const,
+    };
+    const first = await f.create().resume('demo', input);
+    expect(first.round).toBe(1);
+    expect(first.previousResponseSha256).toBe(sha256(canonicalJson(JSON.parse(primaryReply))));
+    expect(JSON.parse(first.content).supplement.decision).toBe(input.decision);
+    expect(await f.create().resume('demo', input)).toEqual(first);
+    await expect(f.create('supplement').ingest('demo', primaryReply)).rejects.toThrow();
+    await expect(new LocalDiscussion(f.root).assertConverged(f.spec, f.policy)).rejects.toThrow();
+    for (const round of [1, 2, 3]) {
+      const control =
+        round === 1
+          ? first
+          : await f.create('supplement').prepare('demo', round, `Supplement ${round}`);
+      await f
+        .create('supplement')
+        .ingest('demo', await f.received(control, round === 3 ? 'CONVERGED' : 'CONTINUE'));
+    }
+    expect((await f.create('supplement').status('demo')).status).toBe('CONVERGED');
+    expect((await new LocalDiscussion(f.root).assertConverged(f.spec, f.policy))?.decision).toBe(
+      input.decision,
+    );
+    expect(
+      await readFile(path.join(f.root, 'runs', 'demo', 'discussion', 'summary.json'), 'utf8'),
+    ).toBe(original);
+    expect(await f.create().resume('demo', input)).toEqual(first);
+    await expect(f.create().resume('demo', { ...input, decision: 'Replace it' })).rejects.toThrow();
+    await expect(f.create('supplement').prepare('demo', 4, 'Extra')).rejects.toThrow();
+  });
+
+  it.each(['USER_DECISION_REQUIRED', 'FAILED'] as const)(
+    'does not restart a supplement that ends with %s',
+    async (outcome) => {
+      const f = await fixture();
+      const primary = await f.create().prepare('demo', 1, 'Question');
+      await f.create().ingest('demo', await f.received(primary, 'USER_DECISION_REQUIRED'));
+      const input = {
+        blockedControlSha256: sha256(canonicalJson(primary) + '\n'),
+        decision: 'Clarification',
+        scopeUnchanged: true as const,
+      };
+      const supplement = await f.create().resume('demo', input);
+      await f.create('supplement').ingest('demo', await f.received(supplement, outcome));
+      await expect(f.create('supplement').prepare('demo', 2, 'Restart')).rejects.toThrow();
+      await expect(
+        f.create().resume('demo', {
+          ...input,
+          blockedControlSha256: sha256(canonicalJson(supplement) + '\n'),
+        }),
+      ).rejects.toThrow();
+      await expect(new LocalDiscussion(f.root).assertConverged(f.spec, f.policy)).rejects.toThrow();
+      expect(await f.create().resume('demo', input)).toEqual(supplement);
+      expect((await f.create('supplement').status('demo')).rounds).toHaveLength(1);
+    },
+  );
+
+  it('recovers decision publication before control and response before summary without reopening primary history', async () => {
+    const f = await fixture();
+    const primary = await f.create().prepare('demo', 1, 'Question');
+    await f.create().ingest('demo', await f.received(primary, 'USER_DECISION_REQUIRED'));
+    const input = {
+      blockedControlSha256: sha256(canonicalJson(primary) + '\n'),
+      decision: 'Clarification',
+      scopeUnchanged: true as const,
+    };
+    vi.spyOn(DiscussionStore.prototype, 'createControl').mockRejectedValueOnce(
+      new Error('control crash'),
+    );
+    await expect(f.create().resume('demo', input)).rejects.toThrow('control crash');
+    const decisionFile = path.join(
+      f.root,
+      'runs',
+      'demo',
+      'discussion',
+      'local-supplement',
+      'decision.json',
+    );
+    const bytes = await readFile(decisionFile, 'utf8');
+    await expect(new LocalDiscussion(f.root).assertConverged(f.spec, f.policy)).rejects.toThrow();
+    const control = await f.create().resume('demo', input);
+    expect(await readFile(decisionFile, 'utf8')).toBe(bytes);
+    const raw = await f.received(control, 'CONVERGED');
+    vi.spyOn(DiscussionStore.prototype, 'writeSummary').mockRejectedValueOnce(
+      new Error('summary crash'),
+    );
+    await expect(f.create('supplement').ingest('demo', raw)).rejects.toThrow('summary crash');
+    await expect(new LocalDiscussion(f.root).assertConverged(f.spec, f.policy)).rejects.toThrow();
+    await f.create('supplement').recover('demo');
+    expect((await new LocalDiscussion(f.root).assertConverged(f.spec, f.policy))?.decision).toBe(
+      input.decision,
+    );
+  });
+
+  it('rejects unauthorized, stale, changed-scope, oversized, drifted and corrupt supplements', async () => {
+    const f = await fixture();
+    await expect(f.create('supplement').prepare('demo', 1, 'Question')).rejects.toThrow();
+    const primary = await f.create().prepare('demo', 1, 'Question');
+    const input = {
+      blockedControlSha256: sha256(canonicalJson(primary) + '\n'),
+      decision: 'Clarification',
+      scopeUnchanged: true as const,
+    };
+    await expect(f.create().resume('demo', input)).rejects.toThrow();
+    await f.create().ingest('demo', await f.received(primary, 'USER_DECISION_REQUIRED'));
+    await expect(
+      f.create().resume('demo', { ...input, blockedControlSha256: 'f'.repeat(64) }),
+    ).rejects.toThrow();
+    await expect(
+      f.create().resume('demo', { ...input, scopeUnchanged: false } as never),
+    ).rejects.toThrow();
+    await expect(
+      f.create().resume('demo', { ...input, decision: '界'.repeat(4000) }),
+    ).rejects.toThrow();
+    f.snapshots.assertLiveSnapshot.mockRejectedValueOnce(new Error('drift'));
+    await expect(f.create().resume('demo', input)).rejects.toThrow('drift');
+    const file = path.join(
+      f.root,
+      'runs',
+      'demo',
+      'discussion',
+      'local-supplement',
+      'decision.json',
+    );
+    await expect(readFile(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    await f.create().resume('demo', input);
+    const decision = JSON.parse(await readFile(file, 'utf8'));
+    await writeFile(file, JSON.stringify({ ...decision, decision: 'tampered' }));
+    await expect(f.create('supplement').status('demo')).rejects.toThrow();
+    await expect(new LocalDiscussion(f.root).assertConverged(f.spec, f.policy)).rejects.toThrow();
+  });
+  it('rejects CONTINUE at supplemental round three without granting convergence', async () => {
+    const f = await fixture();
+    const primary = await f.create().prepare('demo', 1, 'Question');
+    await f.create().ingest('demo', await f.received(primary, 'USER_DECISION_REQUIRED'));
+    let control = await f.create().resume('demo', {
+      blockedControlSha256: sha256(canonicalJson(primary) + '\n'),
+      decision: 'Clarification',
+      scopeUnchanged: true,
+    });
+    for (const round of [1, 2]) {
+      await f.create('supplement').ingest('demo', await f.received(control, 'CONTINUE'));
+      control = await f.create('supplement').prepare('demo', round + 1, `Supplement ${round + 1}`);
+    }
+    await expect(
+      f.create('supplement').ingest('demo', await f.received(control, 'CONTINUE')),
+    ).rejects.toMatchObject({ code: 'DISCUSSION_LIMIT_REACHED' });
+    await expect(new LocalDiscussion(f.root).assertConverged(f.spec, f.policy)).rejects.toThrow();
+  });
   it('continues sequentially then converges, preserving identities and exact retry', async () => {
     const f = await fixture();
     const first = await f.create().prepare('demo', 1, 'Question');

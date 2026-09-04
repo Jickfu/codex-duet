@@ -19,7 +19,7 @@ export function registerLocalLifecycleCommands(
   cwd: () => string,
   report: (value: unknown) => void,
 ) {
-  async function runtime(task: string) {
+  async function runtime(task: string, supplement = false) {
     const taskId = TaskIdSchema.parse(task);
     const root = cwd();
     const snapshots = await GitLocalSnapshotAuthority.open(root, taskId);
@@ -30,7 +30,12 @@ export function registerLocalLifecycleCommands(
       taskId,
       stateRoot,
       provider,
-      discussion: new LocalDiscussion(stateRoot, provider, snapshots),
+      discussion: new LocalDiscussion(
+        stateRoot,
+        provider,
+        snapshots,
+        supplement ? 'supplement' : 'primary',
+      ),
       lifecycle: new LocalLifecycle(
         stateRoot,
         provider,
@@ -45,30 +50,35 @@ export function registerLocalLifecycleCommands(
     .requiredOption('--task <id>')
     .requiredOption('--round <n>')
     .requiredOption('--request-file <path>')
-    .action(async (o: { task: string; round: string; requestFile: string }) => {
-      const round = z.coerce.number().int().min(1).max(3).parse(o.round);
-      const question = await readFile(path.resolve(cwd(), o.requestFile), 'utf8');
-      const { taskId, stateRoot, discussion } = await runtime(o.task);
-      const control = await discussion.prepare(taskId, round, question);
-      report({
-        control,
-        controlFile: path.join(
-          stateRoot,
-          'runs',
-          taskId,
-          'discussion',
-          `round-${round}`,
-          'request.json',
-        ),
-      });
-    });
+    .option('--supplement', 'use the one user-authorized supplemental segment')
+    .action(
+      async (o: { task: string; round: string; requestFile: string; supplement?: boolean }) => {
+        const round = z.coerce.number().int().min(1).max(3).parse(o.round);
+        const question = await readFile(path.resolve(cwd(), o.requestFile), 'utf8');
+        const { taskId, stateRoot, discussion } = await runtime(o.task, o.supplement);
+        const control = await discussion.prepare(taskId, round, question);
+        report({
+          control,
+          controlFile: path.join(
+            stateRoot,
+            'runs',
+            taskId,
+            'discussion',
+            o.supplement ? 'local-supplement' : '',
+            `round-${round}`,
+            'request.json',
+          ),
+        });
+      },
+    );
   local
     .command('discussion-ingest')
     .requiredOption('--task <id>')
     .requiredOption('--message-file <path>')
-    .action(async (o: { task: string; messageFile: string }) => {
+    .option('--supplement', 'ingest into the authorized supplemental segment')
+    .action(async (o: { task: string; messageFile: string; supplement?: boolean }) => {
       const response = await readFile(path.resolve(cwd(), o.messageFile), 'utf8');
-      const { taskId, discussion } = await runtime(o.task);
+      const { taskId, discussion } = await runtime(o.task, o.supplement);
       report(await discussion.ingest(taskId, response));
     });
   for (const [name, method] of [
@@ -78,11 +88,49 @@ export function registerLocalLifecycleCommands(
     local
       .command(name)
       .requiredOption('--task <id>')
-      .action(async (o: { task: string }) => {
-        const { taskId, discussion } = await runtime(o.task);
+      .option('--supplement', 'read/recover the supplemental segment')
+      .action(async (o: { task: string; supplement?: boolean }) => {
+        const { taskId, discussion } = await runtime(o.task, o.supplement);
         report(await discussion[method](taskId));
       });
   }
+  local
+    .command('discussion-resume')
+    .description(
+      'Record one explicit in-scope user decision and prepare supplemental round one; never sends',
+    )
+    .requiredOption('--task <id>')
+    .requiredOption('--blocked-control-sha256 <sha256>')
+    .requiredOption('--decision-file <path>')
+    .requiredOption('--scope-unchanged')
+    .action(
+      async (o: {
+        task: string;
+        blockedControlSha256: string;
+        decisionFile: string;
+        scopeUnchanged: true;
+      }) => {
+        const { taskId, stateRoot, discussion } = await runtime(o.task);
+        const decision = await readFile(path.resolve(cwd(), o.decisionFile), 'utf8');
+        const control = await discussion.resume(taskId, {
+          blockedControlSha256: o.blockedControlSha256,
+          decision,
+          scopeUnchanged: o.scopeUnchanged,
+        });
+        report({
+          control,
+          controlFile: path.join(
+            stateRoot,
+            'runs',
+            taskId,
+            'discussion',
+            'local-supplement',
+            'round-1',
+            'request.json',
+          ),
+        });
+      },
+    );
   local
     .command('run-init')
     .description('Initialize guarded LOCAL lifecycle from bound spec and stored interaction policy')

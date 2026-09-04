@@ -6,11 +6,13 @@ import { canonicalJson, sha256 } from '../duet/task-spec.js';
 import { validateDecision, type LocalUserDecisionV1 } from './user-decision.js';
 import { validateLocalReviewTargetIntegrity, type LocalReviewTargetV1 } from './domain.js';
 import { validateLocalTaskSpec, type LocalTaskSpecV1 } from './task-spec.js';
+import { validateDiscussionDecision, type DiscussionDecision } from './discussion-decision.js';
 
 export function localControlEnvelope(
   input: LocalTaskSpecV1,
   reviewInput?: LocalReviewTargetV1,
   decisionsInput: readonly LocalUserDecisionV1[] = [],
+  discussionInput?: DiscussionDecision,
 ): string {
   const spec = validateLocalTaskSpec(input, input.context);
   const review = reviewInput ? validateLocalReviewTargetIntegrity(reviewInput) : undefined;
@@ -25,6 +27,17 @@ export function localControlEnvelope(
       throw new ChatbridgeError('LOCAL decision chain mismatch', 'LOCAL_DECISION_INVALID');
   });
   const latest = decisions.at(-1);
+  const discussion = discussionInput ? validateDiscussionDecision(discussionInput) : undefined;
+  if (
+    discussion &&
+    (discussion.taskId !== spec.taskId ||
+      discussion.taskSpecSha256 !== spec.integrity.sha256 ||
+      discussion.baselineSnapshotId !== spec.context.baselineSnapshotId)
+  )
+    throw new ChatbridgeError(
+      'Discussion decision does not match task',
+      'DISCUSSION_DECISION_INVALID',
+    );
   if (
     review &&
     (review.taskId !== spec.taskId ||
@@ -37,6 +50,7 @@ export function localControlEnvelope(
     ...spec.context,
     iteration: review?.iteration ?? latest?.iteration ?? 1,
     ...(review ? { reviewTarget: review } : {}),
+    ...(discussion ? { discussionDecisionSha256: discussion.decisionSha256 } : {}),
     ...(latest
       ? {
           decisionChainSha256: sha256(canonicalJson(decisions)),
@@ -57,6 +71,17 @@ export function localControlEnvelope(
       contractSnapshotId: spec.context.baselineSnapshotId,
       instructions:
         'Read the contract and source only from the named immutable LOCAL snapshots via MCP. Return one C2C/1 with JSON content {"identity": <exact identity from this request>, "result": <nonempty string>}. Do not add GitHub headers. Never execute commands or edit files.',
+      ...(discussion
+        ? {
+            discussionDecision: {
+              blockedResult: discussion.blockedResult,
+              decision: discussion.decision,
+              scopeUnchanged: true,
+            },
+            discussionDecisionRules:
+              'This user clarification was followed by converged supplemental discussion. TaskSpec remains authoritative. Do not weaken requirements or broaden scope; if the clarification conflicts, return BLOCKED and require a new task.',
+          }
+        : {}),
       ...(latest
         ? {
             userDecisions: decisions.map((record) => ({
@@ -89,8 +114,9 @@ export function validateLocalControlResponse(
   response: string,
   review?: LocalReviewTargetV1,
   decisions: readonly LocalUserDecisionV1[] = [],
+  discussion?: DiscussionDecision,
 ) {
-  const expected = parseEnvelope(localControlEnvelope(spec, review, decisions));
+  const expected = parseEnvelope(localControlEnvelope(spec, review, decisions, discussion));
   const actual = parseEnvelope(response);
   const requiredIteration =
     review && actual.state === 'PLAN' ? review.iteration + 1 : expected.iteration;

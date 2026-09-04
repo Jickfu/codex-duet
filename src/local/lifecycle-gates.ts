@@ -13,6 +13,7 @@ import { canonicalJson, sha256 } from '../duet/task-spec.js';
 import type { LocalLifecycleGates } from './lifecycle.js';
 import { LocalSnapshotStore } from './snapshot-store.js';
 import { LocalTaskSpecStore, assertLocalContracts, type LocalTaskSpecV1 } from './task-spec.js';
+import { LocalDiscussion } from './discussion.js';
 
 export class StoredLocalLifecycleGates implements LocalLifecycleGates {
   constructor(private readonly root: string) {}
@@ -34,6 +35,8 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
     if (canonicalJson(stored) !== canonicalJson(spec)) this.denied('TASK_SPEC_CONTEXT_MISMATCH');
     await assertLocalContracts(spec, new LocalSnapshotStore(this.root));
     if (!policy.discussion.enabled) return;
+    const supplement = await new LocalDiscussion(this.root).assertConverged(spec, policy);
+    if (supplement) return supplement;
     const discussions = new DiscussionStore(this.root);
     const summary = await discussions.readSummary(spec.taskId);
     if (

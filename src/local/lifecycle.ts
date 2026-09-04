@@ -22,6 +22,11 @@ import { localControlEnvelope, validateLocalControlResponse } from './control-pr
 import { LocalTaskSpecV1Schema, validateLocalTaskSpec, type LocalTaskSpecV1 } from './task-spec.js';
 import type { LocalCodeProvider, LocalSnapshotAuthority } from './local-code-provider.js';
 import {
+  DiscussionDecisionSchema,
+  validateDiscussionDecision,
+  type DiscussionDecision,
+} from './discussion-decision.js';
+import {
   LocalDecisionInputSchema,
   LocalUserDecisionV1Schema,
   decisionFingerprint,
@@ -41,6 +46,7 @@ const RunSchema = z
     maxIterations: z.number().int().min(1).max(100),
     control: z.string(),
     confirmed: z.boolean(),
+    discussionDecision: DiscussionDecisionSchema.optional(),
     decisions: z.array(LocalUserDecisionV1Schema).max(100).optional(),
     cancellation: z
       .object({
@@ -71,7 +77,10 @@ export type LocalRunV1 = z.infer<typeof RunSchema>;
 
 /** Implementations must read durable transport/Discussion evidence, never assume a send succeeded. */
 export interface LocalLifecycleGates {
-  assertPlanningReady(spec: LocalTaskSpecV1, policy: TaskInteractionPolicyV1): Promise<void>;
+  assertPlanningReady(
+    spec: LocalTaskSpecV1,
+    policy: TaskInteractionPolicyV1,
+  ): Promise<void | DiscussionDecision>;
   assertControlConfirmed(
     taskId: string,
     controlSha256: string,
@@ -131,7 +140,7 @@ export class LocalLifecycle {
         checkpoint.reviews.length
       )
         throw new ChatbridgeError('LOCAL run baseline mismatch', 'TASK_SPEC_CONTEXT_MISMATCH');
-      await this.gates.assertPlanningReady(spec, policy);
+      const discussionDecision = await this.gates.assertPlanningReady(spec, policy);
       await this.snapshots.assertLiveSnapshot(spec.context.baselineSnapshotId);
       const run: LocalRunV1 = {
         version: 1,
@@ -142,7 +151,8 @@ export class LocalLifecycle {
         state: 'PLANNING',
         iteration: 1,
         maxIterations,
-        control: localControlEnvelope(spec),
+        control: localControlEnvelope(spec, undefined, [], discussionDecision || undefined),
+        ...(discussionDecision ? { discussionDecision } : {}),
         confirmed: false,
         reviews: [],
         responses: [],
@@ -299,7 +309,7 @@ export class LocalLifecycle {
         decisionSha256: decisionFingerprint(content),
       });
       const decisions = [...(run.decisions ?? []), decision];
-      const control = localControlEnvelope(run.spec, undefined, decisions);
+      const control = localControlEnvelope(run.spec, undefined, decisions, run.discussionDecision);
       await this.snapshots.assertLiveSnapshot(decision.planningSnapshotId);
       assertTransition(run.state, 'PLANNING');
       run.decisions = decisions;
@@ -323,7 +333,7 @@ export class LocalLifecycle {
       if (run.state !== 'EXECUTING') this.invalid();
       // Provider publication may precede this write on crash. Its immutable replay completes recovery.
       const target = await this.provider.prepareReview({ taskId, iteration: run.iteration });
-      const control = localControlEnvelope(run.spec, target, run.decisions);
+      const control = localControlEnvelope(run.spec, target, run.decisions, run.discussionDecision);
       assertTransition(run.state, 'EXECUTED');
       run.state = 'EXECUTED';
       run.control = control;
@@ -364,6 +374,7 @@ export class LocalLifecycle {
       request.response,
       run.state === 'REVIEWING' ? run.reviews.at(-1) : undefined,
       run.decisions,
+      run.discussionDecision,
     );
     await this.gates.assertResponseReceived(request, run.policy);
     if (envelope.state === 'PLAN') {
@@ -404,6 +415,14 @@ export class LocalLifecycle {
     }
     if (run.cancellation) this.invalid();
     validateLocalTaskSpec(run.spec, run.spec.context);
+    if (run.discussionDecision) {
+      const decision = validateDiscussionDecision(run.discussionDecision);
+      if (
+        !run.policy.discussion.enabled ||
+        decision.interactionPolicySha256 !== sha256(canonicalJson(run.policy))
+      )
+        this.invalid();
+    }
     if (
       run.taskId !== taskId ||
       run.spec.taskId !== taskId ||
@@ -431,7 +450,7 @@ export class LocalLifecycle {
     let iteration = 1;
     let reviewCount = 0;
     let decisionCount = 0;
-    let control = localControlEnvelope(run.spec);
+    let control = localControlEnvelope(run.spec, undefined, [], run.discussionDecision);
     let previousResponse: LocalRunV1['responses'][number] | undefined;
     const decisions = run.decisions ?? [];
     const advanceDecision = () => {
@@ -455,14 +474,24 @@ export class LocalLifecycle {
       decisionCount++;
       phase = 'PLANNING';
       iteration = decision.iteration;
-      control = localControlEnvelope(run.spec, undefined, decisions.slice(0, decisionCount));
+      control = localControlEnvelope(
+        run.spec,
+        undefined,
+        decisions.slice(0, decisionCount),
+        run.discussionDecision,
+      );
     };
     const advanceReview = () => {
       const target = run.reviews[reviewCount];
       if (phase !== 'PLAN' || !target || target.iteration !== iteration) this.invalid();
       reviewCount++;
       phase = 'REVIEWING';
-      control = localControlEnvelope(run.spec, target, decisions.slice(0, decisionCount));
+      control = localControlEnvelope(
+        run.spec,
+        target,
+        decisions.slice(0, decisionCount),
+        run.discussionDecision,
+      );
     };
     run.responses.forEach((record) => {
       advanceDecision();
@@ -480,6 +509,7 @@ export class LocalLifecycle {
         record.response,
         target,
         decisions.slice(0, decisionCount),
+        run.discussionDecision,
       );
       phase = envelope.state;
       iteration = envelope.iteration;

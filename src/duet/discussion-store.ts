@@ -13,7 +13,10 @@ import {
 } from './discussion.js';
 
 export class DiscussionStore {
-  constructor(private readonly stateRoot: string) {}
+  constructor(
+    private readonly stateRoot: string,
+    private readonly segment?: 'local-supplement',
+  ) {}
 
   async readSummary(taskIdInput: string): Promise<DiscussionSummaryV1 | undefined> {
     const taskId = this.taskId(taskIdInput);
@@ -83,7 +86,14 @@ export class DiscussionStore {
   }
 
   private summaryPath(taskId: string): string {
-    return path.join(this.stateRoot, 'runs', taskId, 'discussion', 'summary.json');
+    return path.join(
+      this.stateRoot,
+      'runs',
+      taskId,
+      'discussion',
+      this.segment ?? '',
+      'summary.json',
+    );
   }
 
   private roundPath(taskIdInput: string, round: number, name: string): string {
@@ -94,6 +104,7 @@ export class DiscussionStore {
       'runs',
       this.taskId(taskIdInput),
       'discussion',
+      this.segment ?? '',
       `round-${round}`,
       name,
     );

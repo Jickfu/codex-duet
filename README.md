@@ -25,7 +25,7 @@ GITHUB mode is implemented and frozen at M2. M3.0 through M3.3 are frozen with r
 
 ## Install the downloadable skill (recommended)
 
-Download this repository as a ZIP and extract **`skill/codex-duet`**, including its assets and scripts. The [skill folder](skill/codex-duet) contains `SKILL.md`, the workflow reference and a precompiled runtime tarball. Follow [the installation guide](skill/codex-duet/INSTALL.md). Node 20+, npm and Git are required; no source build or global installation is needed. The bundled codex-duet runtime is installed from a local file; its dependencies still require registry access. Nothing is published to npm.
+Download the [standalone skill ZIP](https://github.com/Jickfu/codex-duet/raw/refs/heads/main/skill/codex-duet.zip) and extract `codex-duet`, or download this repository as a ZIP and extract **`skill/codex-duet`**, including its assets and scripts. The [skill folder](skill/codex-duet) contains `SKILL.md`, the workflow reference and a precompiled runtime tarball. Follow [the installation guide](skill/codex-duet/INSTALL.md). Node 20+, npm and Git are required; no source build or global installation is needed. The bundled codex-duet runtime is installed from a local file; its dependencies still require registry access. Nothing is published to npm.
 
 Inside the downloaded skill directory:
 

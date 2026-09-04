@@ -86,7 +86,7 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 | `submit_response` MCP return path                  | **IMPLEMENTED / EXPLICIT CAPABILITY REQUIRED** |
 | LOCAL review snapshot/fingerprint contract         | **IMPLEMENTED M4 / SEPARATE LOCAL AUTHORITY**  |
 | cloudflared lifecycle and remote MCP exposure      | **M5 FROZEN / REMOTE DEVELOPMENT ACCEPTANCE**  |
-| Hardening, packaging, and distribution             | **M6.1 VALIDATED / M6 OPEN**                   |
+| Hardening, packaging, and distribution             | **M6.2 MATRIX VALIDATED / M6 OPEN**            |
 
 M3 is frozen with real Desktop E2E acceptance. M4's locally testable data plane and lifecycle are frozen; its Browser acceptance uses fixtures. M5 adds a separate authenticated foreground service and owned temporary tunnel; a generated-task real ChatGPT LOCAL loop reached DONE; the single-user development scope is frozen. See [remote development setup](remote-local-mode.md). M4 does not claim production remote access or an independent external review. See the [M4 freeze record](milestones/M4-local-readonly-mcp.md).
 

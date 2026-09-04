@@ -18,7 +18,7 @@ ChatGPT Web = Planner + Architect + Reviewer
 
 Codex Desktop accepts and normalizes the user's request, invokes deterministic `chatbridge` primitives, applies the approved plan, runs tests, commits when the selected mode requires it, fixes review findings, asks the user when work is `BLOCKED`, and summarizes the result after `DONE`. Codex is the only workspace executor.
 
-ChatGPT Web plans, designs, and reviews. It does not modify the workspace, execute shell commands, commit, or push. `chatbridge` supplies deterministic infrastructure: the C2C protocol, state validation, Browser Control Plane, GITHUB task/ref safety, the planned LOCAL read-only MCP bridge, and durable orchestration guards. It does not replace Codex reasoning.
+ChatGPT Web plans, designs, and reviews. It does not modify the workspace, execute shell commands, commit, or push. `chatbridge` supplies deterministic infrastructure: C2C, state validation, Browser Control Plane, GITHUB task/ref safety, LOCAL snapshot-bound read-only MCP, and durable orchestration guards. It does not replace Codex reasoning.
 
 The main product path depends on Codex Desktop, not Codex CLI or the Codex SDK. A future headless Codex SDK integration may be an optional mode, but it must not change these responsibilities.
 
@@ -43,10 +43,10 @@ flowchart TB
     C[Codex Desktop] -->|Control: compact C2C| B[Browser Bridge]
     B --> W[ChatGPT Web]
     W -->|GITHUB Data Plane| G[GitHub]
-    W -.->|LOCAL Data Plane: MCP reads, planned M4/M5| M[Local Workspace]
+    W -.->|LOCAL remote MCP access: planned M5| M[Immutable Local Snapshots]
 ```
 
-GITHUB mode uses GitHub. LOCAL mode will use a read-only MCP endpoint. Source and large diffs belong on the selected Data Plane, never the Browser Control Plane.
+GITHUB mode uses GitHub. LOCAL mode implements a loopback read-only MCP endpoint; remote ChatGPT access remains M5. Source and large diffs belong on the selected Data Plane, never the Browser Control Plane.
 
 See [Data planes](data-plane.md), [GITHUB mode](github-mode.md), and [LOCAL mode](local-mode.md).
 
@@ -59,9 +59,9 @@ flowchart TB
     O --> T[Task Conversation Binding<br/>FROZEN M3.2a / E2E PASS]
     T --> B
     O --> C[CodeProvider]
-    C --> L[LocalCodeProvider<br/>PLANNED M4]
+    C --> L[LocalCodeProvider<br/>IMPLEMENTED M4]
     C --> G[GitHubCodeProvider<br/>FROZEN M2]
-    L --> M[Local read-only MCP Bridge<br/>PLANNED M4]
+    L --> M[Local read-only MCP Bridge<br/>IMPLEMENTED M4]
     G --> Git[GitRunner / system Git / GitHub]
 ```
 
@@ -82,25 +82,25 @@ Both providers plug into one C2C/state-machine/orchestration core. There must no
 | `EXECUTING` crash reconciliation                   | **M3.2b FROZEN / REAL DESKTOP CRASH E2E PASS** |
 | Compact C2C and durable TaskSpec                   | **M3.2c FROZEN / REAL DESKTOP E2E PASS**       |
 | Immutable interaction policy and Discussion        | **M3.3 FROZEN / REAL DESKTOP E2E PASS**        |
-| `LocalCodeProvider` and Local read-only MCP Bridge | **PLANNED M4**                                 |
-| `submit_response` MCP return path                  | **PLANNED M4**                                 |
-| LOCAL review snapshot/fingerprint contract         | **DEFERRED TO M4**                             |
+| `LocalCodeProvider` and Local read-only MCP Bridge | **IMPLEMENTED M4 / LOCAL ACCEPTANCE**          |
+| `submit_response` MCP return path                  | **IMPLEMENTED / EXPLICIT CAPABILITY REQUIRED** |
+| LOCAL review snapshot/fingerprint contract         | **IMPLEMENTED M4 / SEPARATE LOCAL AUTHORITY**  |
 | cloudflared lifecycle and remote MCP exposure      | **PLANNED M5**                                 |
 | Hardening, packaging, and distribution             | **PLANNED M6**                                 |
 
-M3 Durable Desktop Orchestration is frozen and complete with real Desktop E2E acceptance. M4 Local Read-Only MCP Data Plane is the next planned milestone; a complete LOCAL loop depends on M4 and M5.
+M3 is frozen with real Desktop E2E acceptance. M4's locally testable data plane and lifecycle are frozen; its Browser acceptance uses fixtures. Live remote LOCAL E2E and public endpoint lifecycle remain M5. M4 does not claim production remote access or an independent external review. See the [M4 freeze record](milestones/M4-local-readonly-mcp.md).
 
 ## Roadmap ownership
 
-| Milestone | Ownership                                   |
-| --------- | ------------------------------------------- |
-| M0        | Protocol / State Machine                    |
-| M1        | Browser Control Plane — **FROZEN**          |
-| M2        | GitHub Data Plane — **FROZEN**              |
-| M3        | Codex Skill + Orchestration — **FROZEN**    |
-| M4        | Local Read-Only MCP Data Plane — **NEXT**   |
-| M5        | cloudflared lifecycle / remote MCP exposure |
-| M6        | hardening / packaging / distribution        |
+| Milestone | Ownership                                               |
+| --------- | ------------------------------------------------------- |
+| M0        | Protocol / State Machine                                |
+| M1        | Browser Control Plane — **FROZEN**                      |
+| M2        | GitHub Data Plane — **FROZEN**                          |
+| M3        | Codex Skill + Orchestration — **FROZEN**                |
+| M4        | Local Read-Only MCP Data Plane — **LOCAL SCOPE FROZEN** |
+| M5        | cloudflared lifecycle / remote MCP exposure             |
+| M6        | hardening / packaging / distribution                    |
 
 ## Architecture Invariants
 

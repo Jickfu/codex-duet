@@ -1,19 +1,19 @@
 # Control Plane and Data Planes
 
-TaskInteractionPolicyV1 selects a Browser Control Plane provider, not a code Data Plane. Both `CODEX_BROWSER` and `PLAYWRIGHT_CLI` may carry only compact control messages. Neither may carry repository source or diffs, and provider selection cannot change GitHub or future LOCAL code authority. Optional Discussion is likewise Control Plane traffic and remains outside C2C.
+TaskInteractionPolicyV1 selects a Browser Control Plane provider, not a code Data Plane. Both `CODEX_BROWSER` and `PLAYWRIGHT_CLI` may carry only compact control messages. Neither may carry repository source or diffs, and provider selection cannot change GitHub or LOCAL code authority. Optional Discussion is likewise Control Plane traffic and remains outside C2C.
 
-Status: GITHUB **IMPLEMENTED / FROZEN M2**; LOCAL **PLANNED M4/M5**
+Status: GITHUB **IMPLEMENTED / FROZEN M2**; LOCAL **FROZEN M4 LOCAL SCOPE / REMOTE M5 PLANNED**
 
 The Browser Bridge is the shared Control Plane. It transports compact C2C lifecycle messages between Codex Desktop and ChatGPT Web. Code context travels through a separate, mode-specific Data Plane.
 
-For new M3.2c tasks, Codex Desktop normalizes the private raw request into a local durable `TaskSpecV1`. Browser carries only a bounded role-specific projection. Repository policy, architecture, source, and diffs are read through GitHub or future LOCAL MCP. TaskSpec is not a replacement repository Data Plane.
+Codex Desktop normalizes the private raw request into a durable TaskSpec. Browser carries only a bounded role-specific projection. Repository policy, architecture, source, and diffs are read through GitHub or snapshot-bound LOCAL MCP. TaskSpec is not a replacement repository Data Plane.
 
 ```mermaid
 flowchart LR
     C[Codex Desktop] -->|Control Plane: compact C2C| B[Browser Bridge]
     B --> W[ChatGPT Web]
     W -->|GITHUB mode| G[GitHub Data Plane]
-    W -.->|LOCAL mode, planned| M[Read-only MCP Data Plane]
+    W -.->|LOCAL remote access: M5| M[Read-only MCP Data Plane]
 ```
 
 The Control Plane may carry `PLANNING`, `PLAN`, `EXECUTED`, `REVIEW`, `DONE`, `BLOCKED`, and compact metadata. It may not carry repositories, source archives, large diffs, DOM snapshots, accessibility trees, browser storage, or credentials.
@@ -37,7 +37,7 @@ The Control Plane may carry `PLANNING`, `PLAN`, `EXECUTED`, `REVIEW`, `DONE`, `B
 | Private/unpushed repository   | Yes   | No GitHub requirement |
 | Immutable GitHub `REVIEW_REF` | No    | Yes                   |
 
-LOCAL entries describe the planned M4/M5 architecture, not currently shipped capability. The two modes share one C2C protocol, state machine, Browser Control Plane, and orchestration core; only the `CodeProvider` and review identity differ.
+LOCAL reads use immutable Git-worktree snapshots, not live-file fallback. The cloudflared/remote-ChatGPT row remains planned for M5; M4 provides local MCP integration. Both modes share C2C, state transitions, Browser Control Plane and response ingress; CodeProvider and formal review identity differ.
 
 ## GITHUB Data Plane
 
@@ -45,4 +45,4 @@ ChatGPT reads commits and diffs from GitHub. Codex must commit and push the task
 
 ## LOCAL Data Plane
 
-ChatGPT will read the current workspace through a public HTTPS MCP endpoint routed by cloudflared to a localhost-only, read-only MCP bridge. It may inspect uncommitted files and diffs without GitHub. Its snapshot/fingerprint review identity and optimized `submit_response` return path are deferred to M4; tunnel lifecycle belongs to M5.
+The localhost-only MCP library exposes eight bounded read tools against exact task/snapshot identities, including uncommitted files and snapshot-bound diffs without GitHub. `LocalReviewTargetV1` binds baseline/current/previous snapshots plus immutable test and execution evidence; it is not a GitHub REVIEW_REF. Disabled-by-default `submit_response` authenticates an exact task/control capability and enters the shared lifecycle ingress. Public HTTPS, remote access and cloudflared are unimplemented M5 work. See [LOCAL mode](local-mode.md).

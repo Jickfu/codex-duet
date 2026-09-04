@@ -6,7 +6,9 @@
 
 ChatGPT Web is the planner, architect, and reviewer. Codex Desktop is the outer orchestrator, and Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries compact control messages without feeding screenshots, DOM snapshots, chat history, repositories, or large diffs into the model context.
 
-This release includes the **Frozen M2 GitHub Mode MVP** data plane and the completed, frozen M3 Durable Desktop Orchestration milestone. M3.2b deterministic `EXECUTING` crash reconciliation passed real Desktop Crash A/B acceptance, and M3.2c Compact Browser Control and durable TaskSpecV1 passed real Desktop multi-round E2E acceptance. M4 Local Read-Only MCP Data Plane is the next planned milestone; Local MCP, cloudflared, and PR automation are not implemented.
+This release includes the **Frozen M2 GitHub Mode MVP** and frozen M3 Durable Desktop Orchestration with real Desktop acceptance. M4 implements the LOCAL immutable snapshot/read-only MCP data plane, guarded lifecycle, both selected Browser providers and optional Discussion; its acceptance scope is local/fixture-based. Remote MCP exposure, cloudflared and live remote LOCAL E2E remain M5. PR automation is not implemented.
+
+**M4's locally testable scope is frozen.** See the [exact implementation ref, verification and limits](docs/milestones/M4-local-readonly-mcp.md).
 
 ## Architecture summary
 
@@ -16,10 +18,10 @@ ChatGPT Web    = Plan + Architect + Review
 Browser Bridge = Shared Control Plane
 
 GITHUB mode → GitHub Data Plane
-LOCAL mode  → Read-only MCP Data Plane (planned M4/M5)
+LOCAL mode  → Read-only MCP Data Plane (local M4; remote M5 planned)
 ```
 
-GITHUB mode is implemented and frozen at M2. M3.0 through M3.3 are frozen with real Desktop E2E acceptance. M3.3 adds an immutable per-task choice between Playwright CLI and Codex Browser control plus optional bounded pre-planning Discussion; both provider routes and a Discussion-enabled lifecycle passed real acceptance. M3.2b reconciles Git/worktree and explicit execution evidence without claiming exactly-once recovery for arbitrary external side effects. LOCAL MCP and `submit_response` are next in M4; cloudflared lifecycle remains M5. Both modes share one C2C/state-machine/orchestration core. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), [the M3 milestone](docs/milestones/M3-durable-orchestrator.md), and [LOCAL mode](docs/local-mode.md).
+GITHUB mode is implemented and frozen at M2. M3.0 through M3.3 are frozen with real Desktop E2E acceptance. M3.3 adds an immutable per-task Browser provider choice and optional bounded Discussion. M4 adds separate LOCAL snapshot/review authority without requiring a commit, push or remote; its disabled-by-default `submit_response` needs an exact control-scoped capability. Recovery does not claim exactly-once arbitrary external effects. Both modes share C2C, state transitions and response ingress. See [architecture](docs/architecture.md), [Control Plane and Data Planes](docs/data-plane.md), [GITHUB mode](docs/github-mode.md), [the M3 milestone](docs/milestones/M3-durable-orchestrator.md), and [LOCAL mode](docs/local-mode.md).
 
 ## Install
 
@@ -96,6 +98,6 @@ The worktree must be clean at initialization and review preparation. The tool ne
 - M1.2 supports one selected runtime and one outstanding send checkpoint per project.
 - ChatGPT UI changes can require updates to the centralized adapter selectors.
 - Real ChatGPT E2E is manual; CI fixtures are local and require no account.
-- LOCAL read-only MCP remains architecture-only until a later milestone.
+- LOCAL supports Git worktrees with an existing HEAD, immutable bounded snapshots and a loopback server library. Public exposure and live remote LOCAL E2E remain unimplemented; see [LOCAL setup and limits](docs/local-mode.md).
 
 See [protocol](docs/protocol.md), [security](docs/security.md), and the [Browser Bridge](docs/browser-bridge.md).

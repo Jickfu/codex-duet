@@ -1,6 +1,6 @@
 # LOCAL mode
 
-Status: **M4 IN PROGRESS; M5 PLANNED**
+Status: **M4 FROZEN — LOCALLY TESTABLE SCOPE; M5 PLANNED**. See the [freeze and acceptance record](milestones/M4-local-readonly-mcp.md).
 
 LOCAL mode is for private, unpushed, or uncommitted Git workspaces. It preserves Codex as the sole Executor. Immutable snapshots, bounded snapshot-bound reads, a loopback MCP server library, capability-scoped response ingress, guarded lifecycle, both selected Browser providers and optional Discussion are implemented. Acceptance is local/fixture-based; remote ChatGPT access and cloudflared remain M5.
 
@@ -182,19 +182,19 @@ The implemented Frozen M1 return path is:
 send → deterministic wait → final browser response
 ```
 
-The optimized LOCAL target for M4/M5 is:
+The explicitly enabled LOCAL return path is implemented locally; its remote delivery remains M5:
 
 ```text
 ChatGPT
   ↓
-submit_response(taskId, iteration, state, content)
+submit_response(capabilityId, capability, taskId, iteration, controlSha256, response)
   ↓
 Local Bridge durable task event/state
   ↓
 Codex Skill
 ```
 
-The target avoids repeated agent-driven page snapshots, DOM reading, or browser polling. It does not replace or retroactively change the current deterministic M1 `send/wait` contract.
+This path can avoid Browser response polling after a capability-authenticated acceptance. It does not replace or retroactively change deterministic M1 `send/wait`, and a capability never bypasses exact Browser send confirmation.
 
 ## Read-only MCP tools
 

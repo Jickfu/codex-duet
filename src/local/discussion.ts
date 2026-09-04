@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { TaskIdSchema } from '../core/domain.js';
 import { ChatbridgeError } from '../core/errors.js';
 import { ConversationUrlPolicy } from '../browser/conversation-url.js';
-import { CodexBrowserControlStore } from '../duet/codex-browser-control-store.js';
 import { DiscussionStore } from '../duet/discussion-store.js';
 import {
   DiscussionControlV1Schema,
@@ -26,6 +25,7 @@ import {
 } from './discussion-decision.js';
 import type { GitLocalSnapshotAuthority } from './git-snapshot-authority.js';
 import type { LocalCodeProvider } from './local-code-provider.js';
+import { localBrowserRecord, localBrowserResponsePath } from './browser-evidence.js';
 
 type Round = { control: DiscussionControlV1; response?: DiscussionResponseV1 };
 type Authority = {
@@ -65,8 +65,6 @@ export class LocalDiscussion {
     const policies = new TaskInteractionPolicyStore(this.root);
     const policy = await policies.read(taskId);
     if (!policy?.discussion.enabled) this.fail('DISCUSSION_DISABLED');
-    if (policy.browserControlProvider !== 'CODEX_BROWSER')
-      this.fail('LOCAL_TRANSPORT_PROOF_UNAVAILABLE');
     await assertLocalContracts(spec, snapshots.store);
     const authority: Authority = { spec, policy, policies };
     if (this.segment === 'supplement') {
@@ -289,7 +287,11 @@ export class LocalDiscussion {
       if (response.round !== history.length) this.fail('DISCUSSION_STATE_INVALID');
       await this.assertPreRun(taskId);
       await authority.policies.lock(taskId);
-      const current = await new CodexBrowserControlStore(this.root).read(taskId);
+      const current = await localBrowserRecord(
+        this.root,
+        taskId,
+        authority.policy.browserControlProvider,
+      );
       if (
         !current ||
         current.operation.state !== 'RESPONDED' ||
@@ -317,16 +319,38 @@ export class LocalDiscussion {
   async status(taskInput: string) {
     const taskId = TaskIdSchema.parse(taskInput);
     return this.lock.withLock(taskId, async () => {
-      return this.summary(taskId, await this.history(taskId, await this.authority(taskId)));
+      const authority = await this.authority(taskId);
+      return this.summary(
+        taskId,
+        await this.history(taskId, authority),
+        authority.policy.browserControlProvider,
+      );
     });
+  }
+
+  /** Exact transport input; caller owns the task lock, so no recursive locking here. */
+  async outbound(taskInput: string, roundInput: number) {
+    const taskId = TaskIdSchema.parse(taskInput);
+    const round = z.number().int().min(1).max(3).parse(roundInput);
+    const authority = await this.authority(taskId);
+    const history = await this.history(taskId, authority);
+    const entry = history.at(-1);
+    if (!entry || entry.control.round !== round || entry.response)
+      this.fail('DISCUSSION_RESPONSE_PENDING');
+    await this.assertPreRun(taskId);
+    await authority.policies.lock(taskId);
+    await this.runtime().snapshots.assertLiveSnapshot(authority.spec.context.baselineSnapshotId);
+    return canonicalJson(entry.control) + '\n';
   }
 
   async recover(taskInput: string) {
     const taskId = TaskIdSchema.parse(taskInput);
     return this.lock.withLock(taskId, async () => {
+      const authority = await this.authority(taskId);
       const summary = this.summary(
         taskId,
-        await this.history(taskId, await this.authority(taskId)),
+        await this.history(taskId, authority),
+        authority.policy.browserControlProvider,
       );
       await this.store.writeSummary(summary);
       return summary;
@@ -408,7 +432,7 @@ export class LocalDiscussion {
     // A stale prefix is recoverable, but a summary must never claim unproven rounds/outcomes.
     const stored = await this.store.readSummary(taskId);
     if (stored) {
-      const derived = this.summary(taskId, history);
+      const derived = this.summary(taskId, history, authority.policy.browserControlProvider);
       if (stored.provider !== derived.provider || stored.rounds.length > history.length)
         this.fail('DISCUSSION_IDENTITY_MISMATCH');
       stored.rounds.forEach((record, index) => {
@@ -444,12 +468,16 @@ export class LocalDiscussion {
     if (response.round === 3 && response.outcome === 'CONTINUE')
       this.fail('DISCUSSION_LIMIT_REACHED');
   }
-  private summary(taskId: string, history: Round[]): DiscussionSummaryV1 {
+  private summary(
+    taskId: string,
+    history: Round[],
+    provider: TaskInteractionPolicyV1['browserControlProvider'] = 'CODEX_BROWSER',
+  ): DiscussionSummaryV1 {
     const outcome = history.at(-1)?.response?.outcome;
     return {
       version: 1,
       taskId,
-      provider: 'CODEX_BROWSER',
+      provider: history[0]?.control.provider ?? provider,
       maxRounds: 3,
       status:
         outcome === 'CONVERGED'
@@ -481,13 +509,11 @@ export class LocalDiscussion {
   }
   private browserArtifact(control: DiscussionControlV1) {
     return readFile(
-      path.join(
+      localBrowserResponsePath(
         this.root,
-        'runs',
         control.taskId,
-        'codex-browser',
+        control.provider,
         this.operationId(control),
-        'response.txt',
       ),
       'utf8',
     );

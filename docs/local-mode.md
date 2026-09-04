@@ -2,7 +2,7 @@
 
 Status: **M4 IN PROGRESS; M5 PLANNED**
 
-LOCAL mode is for private, unpushed, or uncommitted workspaces. It preserves Codex as the sole Executor. Immutable Git-worktree snapshots, snapshot-bound read services, a loopback MCP server library, optional capability-scoped response ingress, and the data-plane CLI below are implemented. The complete LOCAL task lifecycle and remote ChatGPT access are not yet integrated. cloudflared remains M5.
+LOCAL mode is for private, unpushed, or uncommitted Git workspaces. It preserves Codex as the sole Executor. Immutable snapshots, bounded snapshot-bound reads, a loopback MCP server library, capability-scoped response ingress, guarded lifecycle, both selected Browser providers and optional Discussion are implemented. Acceptance is local/fixture-based; remote ChatGPT access and cloudflared remain M5.
 
 ## Implemented data-plane CLI
 
@@ -33,7 +33,7 @@ chatbridge local project-control --task demo
 chatbridge local project-control --task demo --review
 ```
 
-Bind before editing; the first projection produces Planner control. The `--review` form requires an already-prepared review target. Output is JSON with an `envelope` string, not a send operation. Oversize messages fail without truncation. TaskSpec binding, compact LOCAL projections and response-identity validation are implemented, but connecting them to the selected Browser provider, optional Discussion, full lifecycle crash/resume acceptance and M4 freeze remains pending.
+Bind before editing; the first projection produces Planner control. The `--review` form requires an already-prepared review target. Output is JSON with an `envelope` string, not a send operation. Oversize messages fail without truncation. The guarded lifecycle below owns control messages after run initialization.
 
 After run-init, `project-control` is refused: use the exact `control` from run-status or a lifecycle command, including all accepted user decisions.
 
@@ -41,7 +41,7 @@ Snapshot-bound MCP tools expose allowed repository files read-only. LOCAL has se
 
 ### Guarded lifecycle CLI
 
-The [stored gates](adr/ADR-020-local-stored-gates.md) and lifecycle commands now support exact CODEX_BROWSER evidence:
+The [stored gates](adr/ADR-020-local-stored-gates.md) and lifecycle commands support exact CODEX_BROWSER evidence and the additive [LOCAL Playwright proof](adr/ADR-026-local-playwright-proof.md):
 
 ```text
 chatbridge local run-init --task demo
@@ -92,7 +92,44 @@ chatbridge local resume-blocked --task demo --blocked-control-sha256 <blocked-co
 
 This appends a bound decision and returns PLANNING with a new control, not execution permission. Send, confirm and receive through the selected Browser workflow and accept a fresh PLAN before beginning execution. Reviewer blocking at N resumes planning for N+1 against the reviewed snapshot. The original TaskSpec is unchanged; scope or requirement changes require a new task. Exact retries preserve the decision and never consume a later block. See [ADR-023](adr/ADR-023-local-blocked-user-decisions.md). Pre-run Discussion blocking uses the separate discussion-resume command above.
 
-PLAYWRIGHT_CLI remains refused until its exact-proof adapter is implemented. The default Browser CLI ingress also refuses new MCP-source responses. Explicitly enabled loopback servers can use the authenticated [MCP lifecycle adapter](adr/ADR-024-local-mcp-lifecycle-ingress.md): capability checks do not bypass confirmed Browser send, identity, state or live-snapshot guards. Accepted MCP replies leave Browser state truthful; matching durable acceptance permits the next control without inventing a Browser response. No automatic provider switch occurs. Real Browser E2E and final M4 acceptance remain pending.
+For a task that selected PLAYWRIGHT_CLI, attach the existing Browser runtime, then use these LOCAL-specific commands (not legacy `send --task`):
+
+```text
+chatbridge local browser-send --task demo --round 1 --conversation-url https://chatgpt.com/c/REPLACE_WITH_EXPLICIT_CONVERSATION
+chatbridge local browser-wait --task demo --timeout 120000
+# Ingest the exact persisted response artifact with discussion-ingest.
+# After convergence and run-init, send the stored Planner/Reviewer control:
+chatbridge local browser-send --task demo
+chatbridge local browser-wait --task demo
+```
+
+Add `--supplement` with `--round` for the authorized supplementary segment. The first send requires an explicit stable conversation; later sends reuse it. Send output identifies the operation. Exact artifacts are `.chatbridge/runs/<task>/local/playwright/<operationId>/request.txt` and `response.txt`; use the latter as `--message-file` for the appropriate ingress command. `browser-wait` also returns the response in JSON, without ingesting it. `confirm-control` remains required for Planner/Reviewer lifecycle acceptance.
+
+An ATTEMPTED sidecar means a send may have occurred: stop and inspect, never delete/reset the proof or resend automatically. A legacy marker cannot promote it to CONFIRMED. A wait timeout preserves confirmation and permits another bounded wait. A response-before-checkpoint crash recovers the original artifact without another Browser read. No provider fallback occurs.
+
+The default Browser CLI ingress refuses new MCP-source responses. Explicitly enabled loopback servers can use the authenticated [MCP lifecycle adapter](adr/ADR-024-local-mcp-lifecycle-ingress.md): capabilities do not bypass confirmed Browser send, identity, state or live-snapshot guards. Accepted MCP replies leave Browser state truthful; only an exact ACCEPTED receipt permits the next control without inventing a Browser response. Real remote LOCAL Browser E2E remains M5.
+
+### Explicit loopback library composition
+
+M4 exposes a server library, not a server-management daemon or automatic startup. After building, an operator-owned Node entry point can compose the read-only server as follows:
+
+```js
+import path from 'node:path';
+import { GitLocalSnapshotAuthority } from './dist/local/git-snapshot-authority.js';
+import { LocalEvidenceStore } from './dist/local/evidence-store.js';
+import { LocalWorkspaceService } from './dist/local/workspace-service.js';
+import { LocalMcpServer } from './dist/local/mcp-server.js';
+
+const authority = await GitLocalSnapshotAuthority.open(process.cwd(), 'demo');
+const stateRoot = path.join(process.cwd(), '.chatbridge');
+const workspace = new LocalWorkspaceService(authority.store, new LocalEvidenceStore(stateRoot));
+const server = new LocalMcpServer({ workspace }); // Default: 127.0.0.1, ephemeral port, eight read tools.
+const address = await server.start();
+// Connect an explicitly authorized local MCP client to address.url.
+// Call await server.close() when the operator-owned session ends.
+```
+
+The imports above are relative to the repository build output. This does not provision a remote ChatGPT connector. Optional `submitResponse` requires explicit composition of `LocalMcpCapabilityStore` and `LocalMcpLifecycleIngress`; see ADR-024 and the loopback integration tests. Capabilities must be issued for the exact task/iteration/control, delivered only to the authorized caller, and never committed, logged or inserted into Browser control messages. Automatic issuance/distribution and public exposure are not implemented.
 
 ## Target architecture
 
@@ -102,7 +139,7 @@ flowchart TB
         C[Codex Desktop] -->|compact C2C| B[Browser Bridge]
         B --> W[ChatGPT Web]
     end
-    subgraph DP[LOCAL DATA PLANE — PLANNED M4/M5]
+    subgraph DP[LOCAL DATA PLANE — LOCAL M4 / REMOTE M5]
         W -->|MCP read tools| H[Public HTTPS MCP endpoint]
         H --> T[cloudflared]
         T --> M[Local Read-Only MCP Bridge]
@@ -184,7 +221,7 @@ submit_response
 
 ## Security requirements
 
-Before M4 ships, the Local MCP Bridge must enforce:
+The Local MCP Bridge enforces:
 
 - canonical workspace-root sandboxing
 - path-traversal protection

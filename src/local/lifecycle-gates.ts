@@ -3,7 +3,6 @@ import path from 'node:path';
 import { ChatbridgeError } from '../core/errors.js';
 import { parseEnvelope } from '../core/protocol.js';
 import { ConversationUrlPolicy } from '../browser/conversation-url.js';
-import { CodexBrowserControlStore } from '../duet/codex-browser-control-store.js';
 import { DiscussionStore } from '../duet/discussion-store.js';
 import { DiscussionResponseV1Schema } from '../duet/discussion.js';
 import { TaskInteractionPolicyStore } from '../duet/interaction-policy-store.js';
@@ -14,6 +13,7 @@ import type { LocalLifecycleGates } from './lifecycle.js';
 import { LocalSnapshotStore } from './snapshot-store.js';
 import { LocalTaskSpecStore, assertLocalContracts, type LocalTaskSpecV1 } from './task-spec.js';
 import { LocalDiscussion } from './discussion.js';
+import { localBrowserRecord, localBrowserResponsePath } from './browser-evidence.js';
 
 export class StoredLocalLifecycleGates implements LocalLifecycleGates {
   constructor(private readonly root: string) {}
@@ -23,9 +23,6 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
     const current = await store.read(policy.taskId);
     if (canonicalJson(current) !== canonicalJson(policy))
       this.denied('INTERACTION_POLICY_IMMUTABLE');
-    // The old Playwright marker has no outbound digest and cannot prove this exact control.
-    if (policy.browserControlProvider !== 'CODEX_BROWSER')
-      this.denied('LOCAL_TRANSPORT_PROOF_UNAVAILABLE');
     await store.lock(policy.taskId);
   }
 
@@ -102,7 +99,12 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
         }),
       );
       const browserResponse = await readFile(
-        path.join(this.root, 'runs', spec.taskId, 'codex-browser', operationId, 'response.txt'),
+        localBrowserResponsePath(
+          this.root,
+          spec.taskId,
+          policy.browserControlProvider,
+          operationId,
+        ),
         'utf8',
       );
       if (
@@ -121,7 +123,7 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
     identity: { kind: 'PLANNER' | 'REVIEWER'; iteration: number },
   ) {
     await this.assertPolicy(policy);
-    const record = await new CodexBrowserControlStore(this.root).read(taskId);
+    const record = await localBrowserRecord(this.root, taskId, policy.browserControlProvider);
     if (
       !record ||
       !['CONFIRMED', 'RESPONDED'].includes(record.operation.state) ||
@@ -145,7 +147,11 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
       kind: envelope.testStatus === undefined ? 'PLANNER' : 'REVIEWER',
       iteration: request.iteration,
     });
-    const record = await new CodexBrowserControlStore(this.root).read(request.taskId);
+    const record = await localBrowserRecord(
+      this.root,
+      request.taskId,
+      policy.browserControlProvider,
+    );
     if (
       !record ||
       record.operation.state !== 'RESPONDED' ||
@@ -155,13 +161,11 @@ export class StoredLocalLifecycleGates implements LocalLifecycleGates {
     )
       this.denied('CODEX_BROWSER_RESPONSE_MISMATCH');
     const artifact = await readFile(
-      path.join(
+      localBrowserResponsePath(
         this.root,
-        'runs',
         request.taskId,
-        'codex-browser',
+        policy.browserControlProvider,
         record.operation.operationId,
-        'response.txt',
       ),
       'utf8',
     );

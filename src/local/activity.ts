@@ -10,6 +10,7 @@ import { LocalEvidenceStore } from './evidence-store.js';
 import { LocalLifecycle } from './lifecycle.js';
 import { StoredLocalLifecycleGates } from './lifecycle-gates.js';
 import { LocalTaskSpecStore } from './task-spec.js';
+import type { PlaywrightProof } from './playwright-proof.js';
 
 /** Read validated LOCAL activity for shared conversation reservations; unknown is not terminal. */
 export async function localTaskActivity(workspace: string, taskIdInput: string) {
@@ -43,7 +44,10 @@ export async function localTaskActivity(workspace: string, taskIdInput: string) 
 }
 
 /** An accepted MCP response completes a control, without fabricating a Browser response. */
-export async function localMcpControlCompleted(workspace: string, record: CodexBrowserControlV1) {
+export async function localMcpControlCompleted(
+  workspace: string,
+  record: CodexBrowserControlV1 | PlaywrightProof,
+) {
   if (record.operation.state !== 'CONFIRMED' || record.operation.kind === 'DISCUSSION')
     return false;
   const taskId = TaskIdSchema.parse(record.taskId);

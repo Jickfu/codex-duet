@@ -13,12 +13,14 @@ import { LocalLifecycle } from '../local/lifecycle.js';
 import { StoredLocalLifecycleGates } from '../local/lifecycle-gates.js';
 import { LocalTaskSpecStore } from '../local/task-spec.js';
 import { LocalDiscussion } from '../local/discussion.js';
+import { registerLocalPlaywrightCommands } from './local-playwright.js';
 
 export function registerLocalLifecycleCommands(
   local: Command,
   cwd: () => string,
   report: (value: unknown) => void,
 ) {
+  registerLocalPlaywrightCommands(local, cwd, report);
   async function runtime(task: string, supplement = false) {
     const taskId = TaskIdSchema.parse(task);
     const root = cwd();

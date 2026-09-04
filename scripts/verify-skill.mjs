@@ -62,6 +62,11 @@ assert.throws(() => run([path.join(installed, 'scripts/chatbridge.mjs'), '--vers
 const archive = path.join(installed, 'assets/codex-duet.tgz');
 const bytes = await readFile(archive);
 const manifest = JSON.parse(await readFile(path.join(installed, 'bundle.json'), 'utf8'));
+assert.equal(manifest.sourceDirty, false, 'Build the distribution from committed inputs');
+assert.equal(
+  manifest.version,
+  JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version,
+);
 assert.equal(manifest.integrity, 'sha512-' + createHash('sha512').update(bytes).digest('base64'));
 // A damaged download must fail before dependency installation creates node_modules.
 await writeFile(archive, Buffer.concat([bytes, Buffer.from('damage')]));
@@ -96,7 +101,12 @@ run([launcher, 'local', 'init-task', '--task', 'skill-smoke'], target);
 await access(path.join(target, '.chatbridge'));
 await assert.rejects(access(path.join(installed, '.chatbridge')), { code: 'ENOENT' });
 // Ensure the checked-in runtime is current, even if the version number did not change.
-for (const name of await list(path.join(root, 'dist'))) {
+const currentFiles = await list(path.join(root, 'dist'));
+assert.deepEqual(
+  (await list(path.join(installed, 'node_modules/codex-duet/dist'))).sort(),
+  [...currentFiles].sort(),
+);
+for (const name of currentFiles) {
   assert.deepEqual(
     await readFile(path.join(root, 'dist', name)),
     await readFile(path.join(installed, 'node_modules/codex-duet/dist', name)),

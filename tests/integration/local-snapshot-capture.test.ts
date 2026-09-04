@@ -35,6 +35,41 @@ beforeEach(async () => {
 });
 
 describe('real LOCAL snapshot capture', () => {
+  it('excludes credential payload names from tracked, deleted and untracked read surfaces', async () => {
+    const names = [
+      'token.txt',
+      'secrets.yaml',
+      'passwords.ini',
+      'credentials-prod.toml',
+      'client_secret.json',
+    ];
+    for (const name of names) await writeFile(path.join(root, name), 'credential-must-not-leak\n');
+    await git('add', ...names);
+    await git('commit', '-m', 'credential payload baseline');
+    await git('rm', 'token.txt');
+    await writeFile(path.join(root, 'secrets.yaml'), 'changed-credential-must-not-leak\n');
+    await writeFile(path.join(root, 'refresh_token.txt'), 'credential-must-not-leak\n');
+    await writeFile(path.join(root, 'SecretService.ts'), 'export const ordinary = true;\n');
+    const authority = await GitLocalSnapshotAuthority.open(root, 'demo');
+    const snapshot = await authority.capture('demo');
+    const request = { taskId: 'demo', snapshotId: snapshot.snapshotId };
+    const manifest = await authority.store.read('demo', snapshot.snapshotId);
+    const paths = manifest.entries.map((entry) => entry.path);
+    expect(paths).toContain('SecretService.ts');
+    const reader = new LocalWorkspaceService(authority.store);
+    const diff = Buffer.from((await reader.gitDiff(request)).content, 'base64').toString();
+    const status = Buffer.from((await reader.gitStatus(request)).content, 'base64').toString();
+    const listing = JSON.stringify(await reader.listDirectory(request));
+    const search = JSON.stringify(
+      await reader.searchWorkspace({ ...request, query: 'credential-must-not-leak' }),
+    );
+    for (const name of [...names, 'refresh_token.txt']) {
+      expect(paths).not.toContain(name);
+      expect(diff + status + listing + search).not.toContain(name);
+      await expect(reader.readFile({ ...request, path: name })).rejects.toThrow();
+    }
+    expect(diff + status + search).not.toContain('credential-must-not-leak');
+  }, 30000);
   it('binds the default global ignore policy under an overridden HOME', async () => {
     const taskHome = await mkdtemp(path.join(os.tmpdir(), 'local-home-'));
     vi.stubEnv('HOME', taskHome);

@@ -58,12 +58,30 @@ describe('LOCAL path and sensitive-file policy', () => {
       'tools/.azure/profile.json',
       'sandbox/.config/gcloud/access_tokens.db',
       'credentials.json',
+      'token.txt',
+      'secrets.yaml',
+      'private/Passwords.ini',
+      'credentials-prod.toml',
+      'client_secret.json',
+      'refresh_token.txt',
+      'auth-token.env',
+      'api-key.conf',
+      '.token',
+      '.secrets',
+      'private/password',
+      'secrets.local.json',
       '.npmrc',
       '.git/config',
       '.chatbridge/run.json',
     ])
       expect(isSensitiveWorkspacePath(denied)).toBe(true);
-    for (const allowed of ['src/SecretService.ts', 'src/token-parser.ts', 'PasswordValidator.java'])
+    for (const allowed of [
+      'src/SecretService.ts',
+      'src/token-parser.ts',
+      'PasswordValidator.java',
+      'src/secrets.ts',
+      'docs/tokens.md',
+    ])
       expect(isSensitiveWorkspacePath(allowed)).toBe(false);
   });
 

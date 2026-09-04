@@ -3,6 +3,10 @@ const FILE_DENY = [
   /\.(?:pem|key|p12|pfx|jks|keystore)$/i,
   /^(?:application_default_credentials|credentials|secrets|token|tokens)\.json$/i,
   /^passwords\.txt$/i,
+  // Credential payload names, including extensionless/hidden files and deployment suffixes.
+  // Keep source-code names such as SecretService.ts and token-parser.ts reviewable.
+  /^[._-]?(?:passwords?|secrets?|tokens?|credentials?|client[_-]secret|(?:access|refresh|auth)[_-]tokens?|api[_-]keys?)$/i,
+  /^[._-]?(?:passwords?|secrets?|tokens?|credentials?|client[_-]secret|(?:access|refresh|auth)[_-]tokens?|api[_-]keys?)(?:[._-][a-z0-9]+)*\.(?:json|ya?ml|toml|ini|conf|txt|env)$/i,
   /^\.(?:netrc|npmrc|pypirc)$/i,
 ];
 

@@ -6,7 +6,7 @@ import { LocalFormatRepair, repairMeaning } from '../../src/local/format-repair.
 import { localControlEnvelope } from '../../src/local/control-projection.js';
 import { localSpec } from '../fixtures/local-task-spec.js';
 import { parseEnvelope, serializeEnvelope } from '../../src/core/protocol.js';
-import { sha256 } from '../../src/duet/task-spec.js';
+import { canonicalJson, sha256 } from '../../src/duet/task-spec.js';
 import { CodexBrowserControlStore } from '../../src/duet/codex-browser-control-store.js';
 import { TaskInteractionPolicyStore } from '../../src/duet/interaction-policy-store.js';
 import { StoredLocalLifecycleGates } from '../../src/local/lifecycle-gates.js';
@@ -97,6 +97,69 @@ async function fixture() {
 }
 
 describe('bounded lossless LOCAL format repair', () => {
+  it('repairs only the missing DONE section while preserving full identity and decoded result', async () => {
+    const f = await fixture();
+    const parsed = parseEnvelope(f.control);
+    const control = serializeEnvelope({ ...parsed, state: 'EXECUTED', testStatus: 'PASS' });
+    const body = canonicalJson({
+      identity: JSON.parse(parsed.content).identity,
+      result: 'Approved `exact` bytes.',
+    });
+    const good = serializeEnvelope({ ...parsed, state: 'DONE', testStatus: 'PASS', content: body });
+    const bad = good.replace('\n\nDONE:\n', '\n\n');
+    expect(repairMeaning(control, bad).result).toBe('Approved `exact` bytes.');
+    for (const invalid of [
+      good,
+      bad.replace('STATE: DONE', 'STATE: PLAN'),
+      bad.replace('TEST_STATUS: PASS', 'TEST_STATUS: FAIL'),
+      bad.replace('TASK: demo', 'TASK: other'),
+      bad.replace('"result":', '"extra":1,"result":'),
+      bad.replace('"result":', '"result":"other","result":'),
+      bad.replace('\n\n{', '\n\nDONE WRONG:\n{'),
+    ])
+      expect(() => repairMeaning(control, invalid)).toThrow();
+    const receive = async (outbound: string, response: string) => {
+      const outboundSha256 = sha256(outbound);
+      const operationId = sha256(
+        JSON.stringify({ taskId: 'demo', kind: 'REVIEWER', iteration: 1, outboundSha256 }),
+      );
+      await f.store.createResponseArtifact('demo', operationId, response);
+      await f.store.write({
+        version: 1,
+        taskId: 'demo',
+        provider: 'CODEX_BROWSER',
+        conversationUrl: 'https://chatgpt.com/c/repair-fixture',
+        operation: {
+          operationId,
+          kind: 'REVIEWER',
+          iteration: 1,
+          outboundSha256,
+          state: 'RESPONDED',
+          preparedAt: new Date(0).toISOString(),
+          completedAt: new Date(0).toISOString(),
+          inboundSha256: sha256(response),
+        },
+      });
+    };
+    await receive(control, bad);
+    const request = await f.repair.prepare({ ...f.run, state: 'REVIEWING', control }, 1, bad);
+    expect(request.control).toContain('Insert the missing DONE: line');
+    await receive(request.control, good);
+    expect(await f.repair.responseControl('demo', sha256(control), good)).toBe(request.control);
+    await expect(
+      f.repair.responseControl('demo', sha256(control), good.replace('Approved', 'Changed')),
+    ).rejects.toThrow();
+    await f.gates.assertResponseReceived(
+      {
+        taskId: 'demo',
+        iteration: 1,
+        controlSha256: sha256(control),
+        response: good,
+        source: 'BROWSER',
+      },
+      f.run.policy,
+    );
+  });
   it('requires original durable evidence and preserves exact raw artifacts across restart', async () => {
     const f = await fixture();
     const first = await f.repair.prepare(f.run, 1, f.bad);

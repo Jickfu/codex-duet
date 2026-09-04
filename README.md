@@ -6,7 +6,7 @@
 
 ChatGPT Web is the planner, architect, and reviewer. Codex Desktop is the outer orchestrator, and Codex is the only executor allowed to edit the workspace, run commands, or operate Git. A deterministic Playwright bridge carries compact control messages without feeding screenshots, DOM snapshots, chat history, repositories, or large diffs into the model context.
 
-This release includes the **Frozen M2 GitHub Mode MVP** and frozen M3 Durable Desktop Orchestration with real Desktop acceptance. M4 implements the LOCAL immutable snapshot/read-only MCP data plane, guarded lifecycle, both selected Browser providers and optional Discussion; its acceptance scope is local/fixture-based. M5 adds a [remote development service](docs/remote-local-mode.md) with temporary HTTPS, local OAuth approval and read-only task grants; real ChatGPT acceptance remains pending. PR automation is not implemented.
+This release includes the **Frozen M2 GitHub Mode MVP** and frozen M3 Durable Desktop Orchestration with real Desktop acceptance. M4 implements the LOCAL immutable snapshot/read-only MCP data plane, guarded lifecycle, both selected Browser providers and optional Discussion; its acceptance scope is local/fixture-based. M5 adds a [remote development service](docs/remote-local-mode.md) with temporary HTTPS, local OAuth approval and read-only task grants; a [generated-task live acceptance](docs/milestones/M5-live-acceptance-2026-09-04.md) passed with bounded format repair and an authorized conversation handoff. M5 remains development, not frozen or integrated. PR automation is not implemented.
 
 **M4's locally testable scope is frozen.** See the [exact implementation ref, verification and limits](docs/milestones/M4-local-readonly-mcp.md).
 
@@ -98,6 +98,6 @@ The worktree must be clean at initialization and review preparation. The tool ne
 - M1.2 supports one selected runtime and one outstanding send checkpoint per project.
 - ChatGPT UI changes can require updates to the centralized adapter selectors.
 - Real ChatGPT E2E is manual; CI fixtures are local and require no account.
-- LOCAL supports Git worktrees with an existing HEAD, immutable bounded snapshots and a loopback server library. The separate [M5 remote development service](docs/remote-local-mode.md) adds authenticated temporary exposure; live ChatGPT LOCAL E2E remains unverified. See [LOCAL setup and limits](docs/local-mode.md).
+- LOCAL supports Git worktrees with an existing HEAD, immutable bounded snapshots and a loopback server library. The separate [M5 remote development service](docs/remote-local-mode.md) adds authenticated temporary exposure; a generated-task live ChatGPT LOCAL loop reached DONE; M5 remains development. See [LOCAL setup and limits](docs/local-mode.md).
 
 See [protocol](docs/protocol.md), [security](docs/security.md), and the [Browser Bridge](docs/browser-bridge.md).

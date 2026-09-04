@@ -1,6 +1,6 @@
 # LOCAL remote development mode (M5)
 
-Status: local validation passed; public round-trip and real ChatGPT acceptance remain pending. This single-user development path needs no domain or external identity provider. It uses a temporary Cloudflare Quick Tunnel, JSON MCP responses and a local OAuth approval step. See the [validation and network probe record](milestones/M5-remote-mcp-design.md#implementation-and-verification-record).
+Status: local validation and a generated-task real ChatGPT planning/execution/review loop passed, using bounded format repair and an authorized conversation handoff. M5 remains development, not frozen or integrated. This single-user path needs no domain or external identity provider. It uses a temporary Cloudflare Quick Tunnel, JSON MCP responses and a local OAuth approval step. See the [live acceptance record](milestones/M5-live-acceptance-2026-09-04.md).
 
 ## Start and connect
 
@@ -10,7 +10,7 @@ Build codex-duet and install cloudflared from its official distribution. The CLI
 chatbridge local remote-serve --task demo --cloudflared <path-to-cloudflared>
 ```
 
-The foreground service prints a temporary HTTPS `/mcp` URL. Create a ChatGPT developer-mode connection with that URL, OAuth and dynamic client registration. The implemented token endpoint authentication method is `none` (a public OAuth client using PKCE, not anonymous MCP access). No client secret or refresh token is issued. This client configuration still needs live ChatGPT verification.
+The foreground service prints a temporary HTTPS `/mcp` URL. Create a ChatGPT developer-mode connection with that URL, OAuth and dynamic client registration. The implemented token endpoint authentication method is `none` (a public OAuth client using PKCE, not anonymous MCP access). No client secret or refresh token is issued. This configuration was verified in the generated-task live acceptance.
 
 The default callback is `https://chatgpt.com/connector_platform_oauth_redirect`, with issuer identification enabled. Check the callback shown by ChatGPT. If different, restart with `--redirect-uri <exact-uri>` and use the new tunnel URL. Only the stable ChatGPT callback or an exact `https://chatgpt.com/connector/oauth/<id>` is accepted; no wildcard redirects or automatic callback changes.
 

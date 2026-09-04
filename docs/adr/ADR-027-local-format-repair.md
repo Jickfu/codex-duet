@@ -1,6 +1,6 @@
 # ADR-027: Bounded, lossless LOCAL response format repair
 
-Status: accepted for the CODEX_BROWSER JSON-quoting case on 2026-09-04.
+Status: accepted for CODEX_BROWSER lossless format correction on 2026-09-04; JSON quoting and the subsequently observed missing DONE section are supported.
 
 The user authorized at most two independently evidenced format-correction exchanges. Original controls, rejected replies and lifecycle identities remain unchanged. A repaired reply must pass ordinary LOCAL identity, snapshot, state, transport and ingress gates before execution. This is an additive post-M4 association between an explicit repair transport control and its original lifecycle control; it does not relax C2C schemas or fabricate Browser evidence. GITHUB, shared transitions, MCP ingress and PLAYWRIGHT_CLI behavior remain unchanged.
 
@@ -9,6 +9,8 @@ The user authorized at most two independently evidenced format-correction exchan
 The implementation addresses the observed invalid JSON result-string quoting. The envelope and full identity must already be valid, content must fail JSON parsing, and an identity-then-result shape must permit exact raw result extraction. Ambiguous backslashes, multiline strings, apparent extra JSON fields, malformed headers, wrong identity, valid JSON, BLOCKED/FAILED, and correction PLAN iteration changes are refused. No tolerant JSON parser or locally repaired response is used.
 
 The corrected result must decode to exactly the original raw result, character for character. Claiming that meaning was preserved is insufficient. Broader syntax support requires an equally lossless check; unclear intent still requires the user.
+
+The real Reviewer later returned valid canonical JSON and the exact expected headers but omitted the single `DONE:` section label. Within the already-authorized two-attempt format-only scope, this case now has a separate conservative recognizer: only an EXECUTED LOCAL control, its exact serialized headers with STATE DONE, and canonical JSON with exactly identity/result are eligible. The identity must match the original control. Duplicate keys, alternate JSON encodings, different headers and other missing sections are refused. The recognizer extracts meaning only; ChatGPT must return the corrected envelope. Original JSON-quoting repair request bytes remain unchanged for durable replay. No shared parser is relaxed.
 
 ## Persistence and gates
 

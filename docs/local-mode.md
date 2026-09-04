@@ -4,7 +4,7 @@ M5 extension: an explicitly authorized, unsent CODEX_BROWSER Reviewer can move t
 
 Status: **M4 FROZEN — LOCALLY TESTABLE SCOPE; M5 DEVELOPMENT**. See the [freeze and acceptance record](milestones/M4-local-readonly-mcp.md) and [M5 remote setup](remote-local-mode.md).
 
-LOCAL mode is for private, unpushed, or uncommitted Git workspaces. It preserves Codex as the sole Executor. Immutable snapshots, bounded snapshot-bound reads, a loopback MCP server library, capability-scoped response ingress, guarded lifecycle, both selected Browser providers and optional Discussion are implemented. M4 acceptance is local/fixture-based. The separate M5 development entry point is `local remote-serve`; real ChatGPT acceptance remains pending. The remaining sections describe the frozen M4 foundation unless noted otherwise.
+LOCAL mode is for private, unpushed, or uncommitted Git workspaces. It preserves Codex as the sole Executor. Immutable snapshots, bounded snapshot-bound reads, a loopback MCP server library, capability-scoped response ingress, guarded lifecycle, both selected Browser providers and optional Discussion are implemented. M4 acceptance is local/fixture-based. The separate M5 development entry point is `local remote-serve`; a [generated-task real ChatGPT loop](milestones/M5-live-acceptance-2026-09-04.md) reached DONE with bounded format repair and an authorized conversation handoff. The remaining sections describe the frozen M4 foundation unless noted otherwise.
 
 ## Implemented data-plane CLI
 
@@ -113,7 +113,7 @@ The default Browser CLI ingress refuses new MCP-source responses. Explicitly ena
 
 ### Bounded format repair
 
-Malformed CODEX_BROWSER replies with losslessly identifiable JSON quoting errors can use the additive [format-repair flow](adr/ADR-027-local-format-repair.md). It preserves original artifacts and permits at most two separately evidenced corrections. It does not repair replies locally or bypass lifecycle gates. Other malformed or ambiguous replies remain rejected.
+Malformed CODEX_BROWSER replies with losslessly identifiable JSON quoting errors, or exact DONE headers/canonical JSON missing only the DONE section line, can use the additive [format-repair flow](adr/ADR-027-local-format-repair.md). It preserves original artifacts and permits at most two separately evidenced corrections. It does not repair replies locally or bypass lifecycle gates. Other malformed or ambiguous replies remain rejected.
 
 ### Explicit loopback library composition
 

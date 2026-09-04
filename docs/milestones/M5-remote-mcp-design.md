@@ -1,8 +1,8 @@
 # M5 remote MCP access — design proposal
 
-Status: **LOCAL VALIDATION PASSED / LIVE NETWORK AND CHATGPT ACCEPTANCE PENDING**, 2026-09-04.
+Status: **LOCAL VALIDATION AND GENERATED-TASK LIVE ACCEPTANCE PASSED; NOT FROZEN OR INTEGRATED**, 2026-09-04. The chronological probes below are superseded by the [completed live record](M5-live-acceptance-2026-09-04.md).
 
-Baseline: `ee76d03`, the integrated M4 local-scope freeze. The user accepted temporary-address development with local authorization. This record does not claim real ChatGPT acceptance. See [implementation and setup](../remote-local-mode.md).
+Baseline: `ee76d03`, the integrated M4 local-scope freeze. The user accepted temporary-address development with local authorization. The live acceptance record documents the generated fixture's exact scope and recovery steps. See [implementation and setup](../remote-local-mode.md).
 
 ## Verified starting point
 

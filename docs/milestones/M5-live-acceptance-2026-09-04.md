@@ -1,6 +1,6 @@
 # M5 live acceptance — 2026-09-04
 
-Status: partial interoperability demonstrated; lifecycle acceptance stopped at invalid Planner JSON. M5 remains development, not frozen.
+Status: real generated-task LOCAL end-to-end acceptance completed through DONE, including bounded format repair and an explicitly authorized conversation handoff. Temporary service stopped cleanly. M5 remains development, not frozen or integrated; the chronological failures below are preserved as evidence.
 
 ## Environment and authorization
 
@@ -62,3 +62,25 @@ The user approved new request `40776dfe-98b6-4739-876b-78634be8f545` for the sam
 The original conversation's plugin menu did not offer this new app, including after reload and a search for `审查`. A fresh unsent conversation using the same search did show `Codex Duet M5 审查验收`. This is an observed UI availability difference, not proof of a universal ChatGPT restriction. No message was sent in the fresh conversation, and the task binding was not changed.
 
 Reviewer operation `36dc1d42b76fb1290a416c0e465dcb7e298125909897c9cf83eb53c8707f7dda`, outbound SHA-256 `d96e8887fefcd22d2fb44d86f382e460f66194f98dca999fc4b839d4fd965fbe`, remains PREPARED (never ATTEMPTED). LOCAL remains EXECUTED, iteration 1, confirmed=false. Remote review has not passed. A controlled conversation handoff or a verified way to make the new connection available in the bound conversation is required before continuing; do not reset/recreate the task or silently rebind it.
+
+## Authorized conversation handoff
+
+The user explicitly approved controlled migration. Implementation commit `d5f6bad` and [ADR-028](../adr/ADR-028-local-reviewer-conversation-handoff.md) restrict it to the exact unsent LOCAL Reviewer. Validation passed typecheck, lint, build and the complete serial suite: **55 files, 547 passed, one platform skip (548 total)**. The subsequently extended real-Git CLI integration test also passed all five cases, including migration before Reviewer confirmation and normal lifecycle acceptance.
+
+A fresh conversation selected the already-authorized app and received a minimal bootstrap requesting only READY, without review instructions or lifecycle authority. The UI showed READY at `https://chatgpt.com/c/6a9a4ac2-4db4-83ee-a710-033c2e113ad8`. Bootstrap attempt/result artifacts remain under the fixture `.chatbridge` directory.
+
+`local reviewer-handoff` exclusively recorded both bindings and exact pre-handoff lifecycle bytes before switching. The Reviewer operation ID, prepared timestamp and outbound digest above remained unchanged. The original conversation, malformed Planner reply, accepted format repair and immutable snapshots were preserved. The original Reviewer control was filled from its artifact and compared exactly against the composer, then sent once. Browser confirmation was persisted at `2026-09-04T04:38:57.551Z`; standard `confirm-control` moved LOCAL to REVIEWING.
+
+The new app's tool UI showed successful `read_file` against the named baseline contract; authenticated MCP responses returned 200. A separate unauthenticated public `/mcp` request returned 401. Baseline and review manifests independently show equal content hashes for every fixture file except `greeting.mjs`, including unchanged `test.mjs` and both contracts. This comparison did not change either snapshot.
+
+## Reviewer acceptance and shutdown
+
+The first Reviewer reply reported DONE/PASS but omitted the fixed `DONE:` section line. Its exact copied SHA-256 is `699b2d6452ec4ac70ee6e0576760083ecf08badba1de0d84cd595dd5a5d1e2e5`; standard ingress rejected it with `PROTOCOL_ERROR: Malformed C2C envelope`. The reply was preserved under the original Reviewer operation. No local response rewrite or parser relaxation was used.
+
+Within the already-approved bounded format-only scope, ADR-027 gained an exact missing-DONE recognizer: canonical JSON, exact expected headers, full matching identity and unchanged result. Its targeted format/gate/lifecycle suite passed **30 tests**, with typecheck, lint and build also passing. Existing JSON-quoting repair controls remain byte-identical for replay.
+
+Reviewer repair attempt one used operation `f9567e4b24a564715baffce21d0d164c4954e26124d9f02dd10d9cfd8809f529`, request SHA-256 `63c8867b4771779223d189b20f64dcc31e173b8976240ab3e28ab6632e413e4d`. ChatGPT returned a complete protocol code block. Its unchanged block text has SHA-256 `1609aa1fd5c2558238e8c16c41c05ac99689088cfe8cf9f97e18c3c0ab5fdd38`. Standard ingress accepted it for original Reviewer control `d96e8887fefcd22d2fb44d86f382e460f66194f98dca999fc4b839d4fd965fbe` at `2026-09-04T04:47:08.670Z`, after exact identity and result comparison. Final lifecycle is DONE, iteration 1, confirmed=true.
+
+The remote Reviewer approved the snapshot-bound change and unchanged tests/contracts. This is review of the generated greeting acceptance task, not an independent code review of codex-duet's implementation. Development source was implemented and self-reviewed locally.
+
+The foreground service received `stop` after all snapshot reads and exited zero. Its temporary grants were revoked; format repair required no further tools or authorization. No fixture reset/recreation, original-response replacement, main integration, push, or milestone freeze occurred. The completed evidence covers a development Quick Tunnel and one non-sensitive task, not production availability or all ChatGPT environments.
